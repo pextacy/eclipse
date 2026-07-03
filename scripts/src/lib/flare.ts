@@ -26,8 +26,9 @@ export async function resolveByName(provider: Provider, name: string): Promise<s
 /**
  * Resolve the FXRP ERC-20 address dynamically (CLAUDE.md §2.2 — never hardcode).
  *   1. If ASSET_MANAGER_ADDRESS is provided, call fAsset() on it.
- *   2. Else resolve "AssetManagerController" from the registry, enumerate its
- *      asset managers, and pick the one whose fAsset symbol looks like FXRP.
+ *   2. Else use the registry's direct "AssetManagerFXRP" entry if present.
+ *   3. Else resolve "AssetManagerController", enumerate its asset managers, and
+ *      pick the one whose fAsset symbol looks like FXRP.
  */
 export async function resolveFxrp(
   provider: Provider,
@@ -38,6 +39,20 @@ export async function resolveFxrp(
     const fxrp = await am.fAsset();
     const symbol = await erc20(fxrp, provider).symbol();
     return { assetManager: assetManagerOverride, fxrp, symbol };
+  }
+
+  // Coston2 (and Flare) expose the FXRP asset manager directly in the registry.
+  const directAm = await resolveByName(provider, "AssetManagerFXRP").catch(() => ZERO);
+  if (directAm && directAm !== ZERO) {
+    try {
+      const fxrp = await typed<AssetManagerContract>(directAm, ASSET_MANAGER_ABI, provider).fAsset();
+      const symbol = await erc20(fxrp, provider).symbol();
+      if (symbol.toUpperCase().includes("XRP")) {
+        return { assetManager: directAm, fxrp, symbol };
+      }
+    } catch {
+      // fall through to the controller walk
+    }
   }
 
   const controllerAddr = await resolveByName(provider, "AssetManagerController");

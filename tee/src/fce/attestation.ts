@@ -29,13 +29,29 @@ export interface AttestationBundle {
 }
 
 /**
- * Validate the linkage a verifier must confirm before whitelisting: the quote's
- * measured code-hash equals the reproducible-build code-hash, and the quote
- * commits to the signer key. (Quote signature verification itself is delegated
- * to the platform's attestation library — Intel/AMD/FCC — and is out of scope of
- * this glue.) Returns the on-chain registration arguments.
+ * Verifies a raw hardware attestation quote: checks the quote's signature chain
+ * (Intel PCS / AMD KDS / FCC) AND that the quote's measured code-hash and
+ * report-data actually commit to `bundle.codeHash` and `bundle.signerAddress`.
+ *
+ * This cryptographic step CANNOT be faked in application code — it requires the
+ * platform attestation library. So it is an INJECTED dependency: `toRegistration`
+ * refuses to produce on-chain args unless a real verifier is supplied and passes.
+ * (A stub that returns true is only acceptable in local unit tests.)
  */
-export function toRegistration(bundle: AttestationBundle): {
+export type QuoteVerifier = (bundle: AttestationBundle) => boolean;
+
+/**
+ * Produce the on-chain `registerCodeHash(codeHash, signer)` arguments — but ONLY
+ * after: (1) structural checks, (2) provenance is not `dev`, (3) the attested
+ * code-hash matches the reproducible build, and (4) the supplied `verifyQuote`
+ * confirms the hardware quote binds this code-hash + signer. Without a passing
+ * quote verification there is no registration — this is what prevents whitelisting
+ * an unattested signer (the "attestation theater" failure mode).
+ */
+export function toRegistration(
+  bundle: AttestationBundle,
+  verifyQuote: QuoteVerifier,
+): {
   codeHash: string;
   signer: string;
 } {
@@ -50,6 +66,12 @@ export function toRegistration(bundle: AttestationBundle): {
   }
   if ("codeHash" in bundle.provenance && bundle.provenance.codeHash !== bundle.codeHash) {
     throw new Error("attested code-hash does not match the reproducible-build code-hash");
+  }
+  if (!bundle.quote || bundle.quote.length === 0) {
+    throw new Error("missing hardware attestation quote");
+  }
+  if (!verifyQuote(bundle)) {
+    throw new Error("hardware attestation quote failed verification");
   }
   return { codeHash: bundle.codeHash, signer: bundle.signerAddress };
 }

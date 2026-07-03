@@ -6,8 +6,9 @@ Compute). The order book is never public; only the **net** settlement executes
 on-chain — so large orders can't be front-run or sandwiched — and the clearing
 price is provably fair against the FTSOv2 XRP/USD feed.
 
-> Targets **Coston2** (chainId 114). No mocks in the settlement path: real faucet
-> FXRP/USDT0, the real FTSOv2 feed, and a real attestation-bound signer.
+> Targets **Coston2** (chainId 114). **No mocks anywhere** — real FXRP (FAssets), a real
+> operator-supplied quote ERC-20 (there's no canonical USDT0 on Coston2), the real FTSOv2
+> feed, and a real attestation-bound signer. Contract tests fork the live chain.
 > See [`docs/CLAUDE.md`](docs/CLAUDE.md) for the hard rules.
 
 ## Why it stands out
@@ -27,13 +28,13 @@ price is provably fair against the FTSOv2 XRP/USD feed.
 ## Monorepo layout
 
 ```
-contracts/   Solidity — EclipseSettlement.sol, EclipseRegistry.sol, Flare interfaces, mocks
+contracts/   Solidity — EclipseSettlement.sol, EclipseRegistry.sol, Flare interfaces
+             test-foundry/ — Coston2 fork tests (real chain, no mocks); lib/forge-std
 tee/         Matching engine: sealed orders, batch auction, signer, FCC extension + reproducible build
 relay/       Untrusted backend: order intake, engine transport, on-chain relay
 web/         React trader console + front-running comparison + public verifier panel
 scripts/     Registry resolver, deploy, code-hash registration, demo batch
 shared/      Shared types: Order/Settlement schemas + the single EIP-712 type source
-test/        Contract tests (Hardhat/TS) — happy path + every abuse path
 docs/        CLAUDE.md, prd.md, plan.md, phases.md, docs.md
 ```
 
@@ -43,8 +44,10 @@ docs/        CLAUDE.md, prd.md, plan.md, phases.md, docs.md
 pnpm install
 pnpm --filter @eclipse/shared build
 
-# Contracts: compile + full happy/abuse test suite (local mocks — no network)
-pnpm --filter @eclipse/contracts test
+# Contracts: compile (hardhat) + full happy/abuse suite as REAL Coston2 fork
+# tests (Foundry, no mocks — needs Coston2 RPC access)
+pnpm --filter @eclipse/contracts build
+cd contracts && forge test && cd ..
 
 # Engine + relay unit tests
 pnpm --filter @eclipse/tee test
@@ -67,7 +70,9 @@ See [`docs/STATUS.md`](docs/STATUS.md) for the phase-by-phase map.
 
 ## Toolchain note
 
-`CLAUDE.md §3` prefers Foundry for tests. Foundry/Rust is not part of this repo's
-pinned Node toolchain, so the runnable, CI-backed contract suite is **Hardhat +
-TypeScript** (explicitly permitted by §3). A `contracts/foundry.toml` is included
-for contributors who have Foundry. This is the one deliberate, flagged deviation.
+The contract test suite is **Foundry fork tests against real Coston2 — no mocks**
+(`CLAUDE.md §3` prefers Foundry). It forks the live chain at a pinned block and runs
+against the real `FlareContractRegistry`, `FtsoV2`, `FeeCalculator`, FXRP, and WNat, so
+it needs Coston2 RPC access (CI installs Foundry and runs it). Hardhat is retained only
+to compile artifacts for the deploy scripts. There are **no mock contracts anywhere** in
+the repo.

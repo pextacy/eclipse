@@ -39,8 +39,11 @@ function withinBand(price: bigint, ref: bigint, bandBps: bigint): boolean {
 /**
  * Classic uniform-price call auction with an FTSO fairness clamp.
  *
- * 1. Candidate clearing prices are every distinct limit price that ALSO sits
- *    inside the FTSO band (defense in depth — the contract re-checks the band).
+ * 1. A feasible clearing price must sit inside the FTSO band. Under that
+ *    constraint the volume-maximizing price is always at the FTSO reference, a
+ *    band edge, or a submitted limit clamped into the band — so those are the
+ *    candidate prices. (Restricting candidates to raw limits would miss the most
+ *    common cross, e.g. buyer@0.51 / seller@0.49 that should clear at ref 0.50.)
  * 2. Pick the price maximizing crossed volume `min(demand, supply)`.
  * 3. Tie-break deterministically: closest to the FTSO reference, then lower price.
  * 4. Allocate fills by price priority (buys: highest limit first; sells: lowest
@@ -72,9 +75,20 @@ export function runAuction(
   const empty: AuctionResult = { crossed: false, clearingPrice: 0n, matchedVolume: 0n, deltas: [] };
   if (buys.length === 0 || sells.length === 0) return empty;
 
-  // Candidate prices: distinct limits inside the band.
-  const candidates = [...new Set([...buys, ...sells].map((o) => o.limit))]
-    .filter((p) => withinBand(p, ftso.value, bandBps))
+  // Band edges (edge-inclusive, matching the on-chain check), and a clamp of any
+  // price into the band. Candidates = {ref, lo, hi} ∪ {each limit clamped}.
+  const hi = ftso.value + (ftso.value * bandBps) / 10_000n;
+  const lo = ftso.value - (ftso.value * bandBps) / 10_000n;
+  const clamp = (p: bigint) => (p < lo ? lo : p > hi ? hi : p);
+  const candidates = [
+    ...new Set([
+      ftso.value,
+      lo,
+      hi,
+      ...[...buys, ...sells].map((o) => clamp(o.limit)),
+    ]),
+  ]
+    .filter((p) => p > 0n && withinBand(p, ftso.value, bandBps))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   if (candidates.length === 0) return empty;
 
@@ -114,6 +128,8 @@ export function runAuction(
 
   // Total USDT0 that changes hands (single division keeps both sides equal).
   const totalUsdt0 = (volume * price) / scale;
+  // Reject dust crosses that would move FXRP for zero USDT0 (a free fill).
+  if (totalUsdt0 <= 0n) return empty;
 
   const deltas = new Map<string, AccountDelta>();
   const add = (account: string, fxrp: bigint, usdt0: bigint) => {

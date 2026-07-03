@@ -1,10 +1,10 @@
-# Foundry config (for contributors who have Foundry installed).
-# The runnable, CI-backed test suite is Hardhat + TypeScript (see ../test/contracts),
-# because Foundry/Rust is not part of this project's pinned Node toolchain.
-# Kept here so `forge build` / `forge fmt` work and to satisfy CLAUDE.md §3's
-# "Foundry preferred for tests" for anyone who has it.
+# Foundry config. The CI-backed contract test suite lives in test-foundry/ and runs
+# as REAL Coston2 fork tests (no mocks) — `forge test` forks the live chain at a
+# pinned block against the real registry / FTSO / FXRP. remappings.txt wires
+# forge-std (vendored in lib/) and @openzeppelin (from node_modules).
 [profile.default]
 src = "src"
+test = "test-foundry"
 out = "out"
 libs = ["node_modules"]
 solc = "0.8.25"

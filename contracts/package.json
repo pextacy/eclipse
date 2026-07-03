@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "build": "hardhat compile",
-    "test": "hardhat test",
+    "test": "forge test",
     "typecheck": "tsc --noEmit",
-    "clean": "hardhat clean"
+    "clean": "hardhat clean && forge clean"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

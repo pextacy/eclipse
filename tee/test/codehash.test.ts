@@ -51,8 +51,10 @@ describe("attestation → registration", () => {
     provenance: { kind: "fce-extension", codeHash: "0x" + "11".repeat(32) },
   };
 
-  it("returns the on-chain registration args for a valid bundle", () => {
-    expect(toRegistration(bundle)).to.deep.equal({
+  const passingVerifier = () => true;
+
+  it("returns the on-chain registration args for a valid, quote-verified bundle", () => {
+    expect(toRegistration(bundle, passingVerifier)).to.deep.equal({
       codeHash: bundle.codeHash,
       signer: bundle.signerAddress,
     });
@@ -60,16 +62,27 @@ describe("attestation → registration", () => {
 
   it("refuses a dev-provenance signer for the deployed demo", () => {
     expect(() =>
-      toRegistration({ ...bundle, provenance: { kind: "dev", note: "local" } }),
+      toRegistration({ ...bundle, provenance: { kind: "dev", note: "local" } }, passingVerifier),
     ).toThrow(/dev-provenance/);
   });
 
   it("rejects a code-hash mismatch between the quote and the reproducible build", () => {
     expect(() =>
-      toRegistration({
-        ...bundle,
-        provenance: { kind: "confidential-vm", tee: "tdx", codeHash: "0x" + "99".repeat(32) },
-      }),
+      toRegistration(
+        {
+          ...bundle,
+          provenance: { kind: "confidential-vm", tee: "tdx", codeHash: "0x" + "99".repeat(32) },
+        },
+        passingVerifier,
+      ),
     ).toThrow(/does not match/);
+  });
+
+  it("refuses to register when the hardware quote fails verification", () => {
+    expect(() => toRegistration(bundle, () => false)).toThrow(/failed verification/);
+  });
+
+  it("refuses to register when the quote is missing", () => {
+    expect(() => toRegistration({ ...bundle, quote: "" }, passingVerifier)).toThrow(/missing/);
   });
 });

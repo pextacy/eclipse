@@ -36,13 +36,40 @@ describe("runAuction", () => {
     const r = runAuction(orders, FTSO, BAND);
     expect(r.crossed).to.equal(true);
     expect(r.matchedVolume).to.equal(100_000_000n);
-    // Tie between 0.498 and 0.502 (equidistant from 0.5) → lower price wins.
-    expect(r.clearingPrice).to.equal(49_800_000n);
-    // USDT0 = 100 * 0.498 = 49.8 → 49_800_000 base units (6dp cancels via /1e8).
+    // Any price in [0.498, 0.502] crosses 100; the fair tie-break picks the one
+    // closest to the FTSO reference — here the reference itself, 0.5.
+    expect(r.clearingPrice).to.equal(50_000_000n);
+    // USDT0 = 100 * 0.5 = 50 → 50_000_000 base units (6dp cancels via /1e8).
     const buyer = r.deltas.find((d) => d.account === A)!;
     expect(buyer.fxrpDelta).to.equal(100_000_000n);
-    expect(buyer.usdt0Delta).to.equal(-49_800_000n);
+    expect(buyer.usdt0Delta).to.equal(-50_000_000n);
     expect(conserves(r.deltas)).to.equal(true);
+  });
+
+  it("crosses a straddling book (aggressive buyer/seller) at the FTSO reference", () => {
+    // Buyer willing to overpay (0.51) and seller willing to undersell (0.49):
+    // neither limit sits inside the ±0.5% band, but the cross is real and must
+    // clear at the fair in-band price (the reference, 0.5). This is the common
+    // case the old limit-only candidate set wrongly rejected.
+    const orders = [
+      order(Side.Buy, "100000000", "51000000", A), // buy 100 FXRP @ 0.51
+      order(Side.Sell, "100000000", "49000000", B), // sell 100 FXRP @ 0.49
+    ];
+    const r = runAuction(orders, FTSO, BAND);
+    expect(r.crossed).to.equal(true);
+    expect(r.matchedVolume).to.equal(100_000_000n);
+    expect(r.clearingPrice).to.equal(50_000_000n);
+    expect(conserves(r.deltas)).to.equal(true);
+  });
+
+  it("rejects a dust cross that would move FXRP for zero USDT0", () => {
+    // volume * price / scale rounds to 0 USDT0 → no free fills.
+    const orders = [
+      order(Side.Buy, "1", "50100000", A),
+      order(Side.Sell, "1", "49900000", B),
+    ];
+    const r = runAuction(orders, FTSO, BAND);
+    expect(r.crossed).to.equal(false);
   });
 
   it("maximizes matched volume across many price levels", () => {

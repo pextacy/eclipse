@@ -38,7 +38,7 @@ Key properties:
 | Chain ID | `114` |
 | RPC | `https://coston2-api.flare.network/ext/C/rpc` |
 | Explorer | `https://coston2-explorer.flare.network` |
-| Faucet | Coston2 faucet — provides **C2FLR**, **FXRP**, and **USDT0** |
+| Faucet | Coston2 faucet — **C2FLR** (gas); **FXRP** via FAssets. There is **no canonical USDT0 on Coston2** (USDT0 is a Flare *mainnet* token) — the operator supplies the quote ERC-20 for `USDT0_ADDRESS` |
 | `FlareContractRegistry` | `0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019` (same on all Flare networks) |
 
 **Never hardcode protocol addresses.** Resolve at runtime:
@@ -53,7 +53,10 @@ FtsoV2Interface ftsoV2 = ContractRegistry.getFtsoV2();
 // FXRP token address = IAssetManager(assetManager).fAsset()
 ```
 
-FXRP is a standard ERC-20 once resolved. USDT0 is the quote token, also an ERC-20 from the faucet.
+FXRP is a standard ERC-20 once resolved. The quote token is a standard ERC-20 the operator
+supplies via `USDT0_ADDRESS`. Note: USDT0 exists on Flare **mainnet**
+(`0xe7cd86e13AC4309349F30B3435a9d337750fC82D`) but **not** on Coston2, so on Coston2 the quote
+leg is an operator-provided ERC-20 (e.g. a deployed test stablecoin, or WNat for a native-backed demo).
 
 ## 3. Flare integration details
 
@@ -154,7 +157,8 @@ Everything else (FtsoV2, AssetManager, FXRP, USDT0) is resolved at runtime from 
 pnpm install
 pnpm --filter @eclipse/shared build
 
-# 2. Fund the deployer from the Coston2 faucet (C2FLR + FXRP + USDT0), confirm on explorer
+# 2. Fund the deployer: C2FLR (faucet) + FXRP (FAssets) + a quote ERC-20 for USDT0_ADDRESS
+#    (no canonical USDT0 on Coston2 — supply your own quote token), confirm on explorer
 cp .env.example .env       # then fill in the keys
 
 # 3. Resolve live addresses (no hardcoding) and sanity-check an FXRP transfer
@@ -181,21 +185,33 @@ pnpm --filter @eclipse/scripts demo:batch   # 4 sealed orders → one clearing p
 pnpm --filter @eclipse/web dev
 ```
 
-> Local test suites (no network): `pnpm --filter @eclipse/contracts test`,
-> `pnpm --filter @eclipse/tee test`, `pnpm --filter @eclipse/relay test`.
-> Toolchain note: the runnable contract tests are Hardhat + TypeScript (Foundry
-> is optional via `contracts/foundry.toml`) — see `README.md`.
+> Test suites: `cd contracts && forge test` (contracts — **real Coston2 fork, needs RPC**),
+> `pnpm --filter @eclipse/tee test`, `pnpm --filter @eclipse/relay test` (engine/relay — offline).
 
 ## 9. Testing
 
-Required tests (Foundry/Hardhat):
+The contract suite is **Foundry fork tests against real Coston2 — no mocks.** It forks
+Coston2 at a pinned block and runs against the real `FlareContractRegistry`, the real
+`FtsoV2` XRP/USD feed (live value), the real `FeeCalculator`, the real FXRP FAsset, and
+`WNat` (the USD quote leg, since Coston2 has no canonical USDT0). Balances are real:
+FXRP is transferred from a real on-chain holder and WNat is minted 1:1 from native C2FLR.
 
-- **Happy path:** deposits → sealed batch → `settleBatch` → correct net balances, one clearing price.
+```bash
+cd contracts && forge test            # needs Coston2 RPC access (forks the live chain)
+```
+
+Cases (all against the real chain):
+
+- **Happy path:** deposits → commit → `settleBatch` → correct net balances, one clearing price.
 - **Attestation negative:** settlement signed by a non-whitelisted code-hash → `UnattestedSigner()`.
-- **Fairness negative:** clearing price outside the FTSO band → `PriceOutsideBand()`.
-- **Custody safety:** withdraw with an open matched leg → reverts; idle escrow withdraw always succeeds.
+- **Fairness negative:** clearing price outside the live FTSO band → `PriceOutsideBand()`, plus a band-edge acceptance test.
+- **Custody safety:** withdraw with an open matched leg → reverts; idle escrow withdraw always succeeds; expired-leg auto-release.
 - **Replay:** reusing a batch nonce → `ReplayedBatch()`.
-- **Conservation:** unbalanced net deltas → `UnbalancedBatch()`.
+- **Conservation:** unbalanced net deltas → `UnbalancedBatch()`; plus `NotCommitted` / `InsufficientEscrow`.
+
+The engine/relay suites cover the uniform-price auction (including straddling crosses and dust
+rejection), sealed-box round-trips, EIP-712 signature recovery, the order-replay guard, the
+reproducible code-hash, and the untrusted-relay guarantees (no plaintext in logs).
 
 ## 10. Security notes
 

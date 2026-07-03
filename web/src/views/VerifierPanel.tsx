@@ -66,6 +66,21 @@ export function VerifierPanel() {
 
   const signer = batch?.signer;
 
+  // Fairness parameters read straight from the settlement contract — not from
+  // client config — so the verdict reflects what the chain actually enforces.
+  const bandOnChain = useReadContract({
+    address: deployment.eclipseSettlement,
+    abi: eclipseSettlementAbi,
+    functionName: "bandBps",
+    query: { enabled: isConfigured },
+  });
+  const feedIdOnChain = useReadContract({
+    address: deployment.eclipseSettlement,
+    abi: eclipseSettlementAbi,
+    functionName: "xrpUsdFeedId",
+    query: { enabled: isConfigured },
+  });
+
   const codeHash = useReadContract({
     address: deployment.eclipseRegistry,
     abi: eclipseRegistryAbi,
@@ -81,11 +96,17 @@ export function VerifierPanel() {
     query: { enabled: isConfigured && !!signer },
   });
 
-  const band = deployment.bandBps;
+  // Prefer the on-chain immutables; fall back to config only until they load.
+  const band = typeof bandOnChain.data === "bigint" ? Number(bandOnChain.data) : deployment.bandBps;
+  const feedId =
+    typeof feedIdOnChain.data === "string" ? feedIdOnChain.data : deployment.feedId;
   const ref = batch ? ftsoToNumber(batch.ftsoRef) : 0;
   const onChain = batch ? ftsoToNumber(batch.ftsoOnChain) : 0;
   const clearing = batch ? ftsoToNumber(batch.clearingPrice) : 0;
-  const deviationBps = ref > 0 && batch ? Math.abs((clearing - ref) / ref) * 10_000 : 0;
+  // Deviation is measured against the value the contract re-read in the settle
+  // tx (ftsoOnChain), which is exactly what the band check used.
+  const deviationBps =
+    onChain > 0 && batch ? Math.abs((clearing - onChain) / onChain) * 10_000 : 0;
   const insideBand = batch ? deviationBps <= band : false;
   const isAuthorized = authorized.data === true;
   const codeHashHex = typeof codeHash.data === "string" ? codeHash.data : undefined;
@@ -224,8 +245,8 @@ export function VerifierPanel() {
                       <MonoNumber tone="info">{fmtNum(onChain, 5)}</MonoNumber>
                     </Field>
                     <Field label="XRP/USD feed id">
-                      <span title={deployment.feedId}>
-                        <MonoNumber tone="muted">{truncateHex(deployment.feedId, 10, 8)}</MonoNumber>
+                      <span title={feedId}>
+                        <MonoNumber tone="muted">{truncateHex(feedId, 10, 8)}</MonoNumber>
                       </span>
                     </Field>
                   </dl>

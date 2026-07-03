@@ -104,6 +104,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     error NoOpenLeg();
     error LegNotExpired();
     error InsufficientFtsoFee();
+    error RefundFailed();
     error ZeroAddress();
 
     // ─────────────────────────────────────────── events
@@ -240,7 +241,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
 
         if (refund != 0) {
             (bool ok,) = msg.sender.call{value: refund}("");
-            if (!ok) revert InsufficientFtsoFee();
+            if (!ok) revert RefundFailed();
         }
     }
 

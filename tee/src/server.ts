@@ -13,10 +13,35 @@
 import { createServer } from "node:http";
 import "dotenv/config";
 import { z } from "zod";
+import { Contract, JsonRpcProvider } from "ethers";
 import { SealedOrderSchema, DEFAULT_BAND_BPS, DEFAULT_BATCH_INTERVAL_SECONDS } from "@eclipse/shared";
 import { MatchingEngine } from "./engine.js";
 import { LiveFtsoReader, StaticFtsoReader } from "./ftso.js";
 import { generateKeypair, type SealedKeypair } from "./seal.js";
+
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+const NONCE_ABI = [
+  "function lastSettlementNonce() view returns (uint256)",
+  "function lastCommitNonce() view returns (uint256)",
+];
+
+/**
+ * Resume the batch counter above the highest nonce the settlement contract has
+ * already recorded, so a restarted engine can't be bricked by `ReplayedBatch`.
+ * Best-effort: on any RPC error we start from 0 (safe on a fresh deployment).
+ */
+async function seedSequenceFromChain(engine: MatchingEngine, rpc: string, settlementAddress: string) {
+  if (!settlementAddress || settlementAddress === ZERO_ADDR) return;
+  try {
+    const c = new Contract(settlementAddress, NONCE_ABI, new JsonRpcProvider(rpc)) as any;
+    const [settle, commit] = await Promise.all([c.lastSettlementNonce(), c.lastCommitNonce()]);
+    const highest = settle > commit ? settle : commit;
+    engine.seedSequence(BigInt(highest));
+    if (highest > 0n) console.log(`  resumed batch counter above on-chain nonce ${highest}`);
+  } catch (e) {
+    console.warn(`  could not read on-chain nonces (${(e as Error).message}); starting from 0`);
+  }
+}
 
 const BatchRequest = z.object({ orders: z.array(SealedOrderSchema).min(1).max(1024) });
 
@@ -64,6 +89,11 @@ async function buildEngine(): Promise<MatchingEngine> {
 
 async function main() {
   const engine = await buildEngine();
+  await seedSequenceFromChain(
+    engine,
+    env("COSTON2_RPC", "https://coston2-api.flare.network/ext/C/rpc"),
+    env("ECLIPSE_SETTLEMENT_ADDRESS", ZERO_ADDR),
+  );
   const port = Number(env("ENGINE_PORT", "8899"));
 
   const server = createServer((req, res) => {

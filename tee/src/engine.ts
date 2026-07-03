@@ -37,6 +37,8 @@ export class MatchingEngine {
   private readonly reader: FtsoReader;
   private readonly cfg: EngineConfig;
   private seq = 0n;
+  /** Consumed order ids (`account:nonce` → order expiry) — replay guard. */
+  private readonly consumed = new Map<string, number>();
 
   constructor(
     keypair: SealedKeypair,
@@ -58,6 +60,17 @@ export class MatchingEngine {
     return this.signer.address;
   }
 
+  /**
+   * Seed the batch/nonce counter from the on-chain state at boot. The contract
+   * enforces strictly-increasing commit/settlement nonces, so after a restart
+   * the engine must resume ABOVE the highest nonce the chain already recorded —
+   * otherwise every new batch reverts `ReplayedBatch` forever. Idempotent: only
+   * ever advances the counter.
+   */
+  seedSequence(highestOnChainNonce: bigint): void {
+    if (highestOnChainNonce > this.seq) this.seq = highestOnChainNonce;
+  }
+
   private clock(): number {
     return this.cfg.now ? this.cfg.now() : Math.floor(Date.now() / 1000);
   }
@@ -74,11 +87,23 @@ export class MatchingEngine {
    */
   async runBatch(sealedOrders: SealedOrder[]): Promise<BatchOutcome> {
     const now = this.clock();
+    // Drop replay guards for orders that have since expired (bounded memory).
+    for (const [key, expiry] of this.consumed) {
+      if (expiry <= now) this.consumed.delete(key);
+    }
+
     const orders: Order[] = [];
     for (const s of sealedOrders) {
       try {
         const o = await this.open(s);
-        if (o.expiry > now) orders.push(o);
+        if (o.expiry <= now) continue; // expired
+        // Replay guard: each sealed order (account, nonce) is one-shot. The
+        // untrusted relay can resubmit the same ciphertext; we match it at most
+        // once. A trader who wasn't filled resubmits a fresh order (new nonce).
+        const key = `${o.account.toLowerCase()}:${o.nonce.toString()}`;
+        if (this.consumed.has(key)) continue;
+        this.consumed.set(key, o.expiry);
+        orders.push(o);
       } catch {
         // Undecryptable / malformed ciphertext is silently dropped — the relay
         // cannot read it and neither will we leak why.

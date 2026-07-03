@@ -13,12 +13,14 @@ cp .env.example .env      # then fill in the keys below
 ```
 
 Fill `.env`:
-- `DEPLOYER_PRIVATE_KEY` — desk A + gas payer. **Fund it from the Coston2 faucet**
-  (C2FLR + FXRP + USDT0). Confirm balances on the explorer.
-- `DEMO_DESK_B_PRIVATE_KEY` — desk B (the other side of the demo batch), also faucet-funded.
+- `DEPLOYER_PRIVATE_KEY` — desk A + gas payer. **Fund it** with C2FLR (Coston2 faucet),
+  FXRP (FAssets), and the quote ERC-20 you use for `USDT0_ADDRESS`. Confirm on the explorer.
+- `DEMO_DESK_B_PRIVATE_KEY` — desk B (the other side of the demo batch), also funded.
 - `ENGINE_SIGNER_PRIVATE_KEY` — the engine's settlement signing key (dev key for
-  Phase 1–2; the attested FCC signer for Phase 3).
-- `USDT0_ADDRESS` — the faucet USDT0 ERC-20.
+  Phase 1–2; the attested FCC signer for Phase 3). Set `ALLOW_DEV_SIGNER=true` to let
+  `deploy` auto-register the dev signer under a placeholder code-hash (dev only).
+- `USDT0_ADDRESS` — the quote ERC-20. **No canonical USDT0 exists on Coston2** (it's a Flare
+  *mainnet* token), so supply your own quote token here (a deployed test stablecoin, or WNat).
 - `ASSET_MANAGER_ADDRESS` — the FXRP AssetManager (used to resolve FXRP via
   `fAsset()`); only needed if the registry's `AssetManagerController` lookup can't
   find it automatically.

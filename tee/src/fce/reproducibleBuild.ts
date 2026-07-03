@@ -18,6 +18,12 @@ import { computeCodeHash, type FileEntry } from "./codehash.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = resolve(here, "..");
 const teeRoot = resolve(here, "../..");
+const repoRoot = resolve(teeRoot, "..");
+
+/** Read a build manifest into the hash; missing optional files are skipped. */
+function manifest(absPath: string, label: string, acc: FileEntry[]): void {
+  if (existsSync(absPath)) acc.push({ path: label, content: readFileSync(absPath, "utf8") });
+}
 
 /** All engine source files are part of the measured enclave code. */
 function collect(dir: string, acc: FileEntry[] = []): FileEntry[] {
@@ -43,7 +49,12 @@ function main() {
   };
 
   const files = collect(srcRoot);
-  const codeHash = computeCodeHash(files, { sourceDateEpoch, toolchain });
+  // Pin exact dependencies + build config, not just version strings.
+  const manifests: FileEntry[] = [];
+  manifest(resolve(teeRoot, "package.json"), "tee/package.json", manifests);
+  manifest(resolve(teeRoot, "tsconfig.json"), "tee/tsconfig.json", manifests);
+  manifest(resolve(repoRoot, "pnpm-lock.yaml"), "pnpm-lock.yaml", manifests);
+  const codeHash = computeCodeHash(files, { sourceDateEpoch, toolchain, manifests });
 
   const outDir = resolve(teeRoot, "build");
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
@@ -53,12 +64,14 @@ function main() {
     toolchain,
     fileCount: files.length,
     files: files.map((f) => f.path).sort(),
+    manifests: manifests.map((m) => m.path).sort(),
   };
   writeFileSync(resolve(outDir, "codehash.json"), JSON.stringify(out, null, 2) + "\n");
 
   console.log(`Engine reproducible build`);
   console.log(`  SOURCE_DATE_EPOCH = ${sourceDateEpoch}`);
   console.log(`  files measured    = ${files.length}`);
+  console.log(`  manifests pinned  = ${manifests.map((m) => m.path).join(", ") || "(none)"}`);
   console.log(`  ENGINE_CODE_HASH  = ${codeHash}`);
 }
 

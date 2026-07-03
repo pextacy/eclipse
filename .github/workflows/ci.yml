@@ -19,17 +19,25 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared
-        run: pnpm --filter @eclipse/shared build
+      # Workspace libs must be built so downstream typechecks resolve their types.
+      - name: Build workspace libs
+        run: pnpm --filter @eclipse/shared --filter @eclipse/tee --filter @eclipse/relay build
 
-      - name: Compile contracts
+      - name: Compile contracts (hardhat artifacts for deploy)
         run: pnpm --filter @eclipse/contracts build
 
-      - name: Contract tests (happy + abuse paths)
-        run: pnpm --filter @eclipse/contracts test
+      # Contract tests run against a REAL Coston2 fork — no mocks. Real
+      # FlareContractRegistry, FtsoV2, FeeCalculator, FXRP and WNat are pulled in
+      # by forking Coston2 at a pinned block (see test-foundry/EclipseSettlement.t.sol).
+      - name: Contract fork tests (real Coston2, no mocks)
+        working-directory: contracts
+        run: forge test -vv
 
       - name: Engine tests
         run: pnpm --filter @eclipse/tee test

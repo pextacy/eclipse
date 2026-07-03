@@ -17,20 +17,56 @@ import { EngineClient } from "./engineClient.js";
 import { OnChainRelay } from "./onchain.js";
 import { Logger } from "./logger.js";
 
-export function createRelayServer(relay: Relay, engine: EngineClient) {
+/** Cap intake body size so an unauthenticated POST can't exhaust memory. */
+const MAX_BODY_BYTES = 256 * 1024;
+
+/** Marks an error as caused by bad client input → HTTP 400 (vs 500 internal). */
+class BadRequest extends Error {}
+
+export interface RelayServerOptions {
+  /** Shared secret required to close a batch. If unset, close is loopback-only. */
+  operatorToken?: string;
+}
+
+export function createRelayServer(relay: Relay, engine: EngineClient, opts: RelayServerOptions = {}) {
   const readJson = (req: IncomingMessage) =>
     new Promise<unknown>((resolve, reject) => {
       let raw = "";
-      req.on("data", (c) => (raw += c));
+      let size = 0;
+      req.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_BODY_BYTES) {
+          reject(new BadRequest("request body too large"));
+          req.destroy();
+          return;
+        }
+        raw += c;
+      });
       req.on("end", () => {
         try {
           resolve(raw ? JSON.parse(raw) : {});
-        } catch (e) {
-          reject(e);
+        } catch {
+          reject(new BadRequest("invalid JSON"));
         }
       });
       req.on("error", reject);
     });
+
+  const isLoopback = (req: IncomingMessage) => {
+    const a = req.socket.remoteAddress ?? "";
+    return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+  };
+
+  // Batch close must never be publicly triggerable: an attacker who force-closes
+  // right after their own order shrinks the batch and de-anonymizes a victim's
+  // sealed trade in the public settlement. Require the operator token, or (if
+  // none is configured) restrict to loopback for local demos.
+  const authorizedToClose = (req: IncomingMessage) => {
+    if (opts.operatorToken) {
+      return req.headers["x-operator-token"] === opts.operatorToken;
+    }
+    return isLoopback(req);
+  };
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const send = (code: number, body: unknown) => {
@@ -42,14 +78,23 @@ export function createRelayServer(relay: Relay, engine: EngineClient) {
       if (req.method === "GET" && req.url === "/engine/pubkey") return send(200, await engine.pubkey());
       if (req.method === "POST" && req.url === "/orders") {
         const accepted = relay.submit(await readJson(req));
-        return send(202, { accepted: true, submissionId: accepted.submissionId, pool: relay.pool.size() });
+        // Do not echo pool size — it is a pre-settlement metadata side channel.
+        return send(202, { accepted: true, submissionId: accepted.submissionId });
       }
       if (req.method === "POST" && req.url === "/batch/close") {
+        if (!authorizedToClose(req)) return send(401, { error: "unauthorized" });
         return send(200, await relay.closeBatch());
       }
       send(404, { error: "not found" });
     } catch (e) {
-      send(400, { error: (e as Error).message });
+      if (e instanceof BadRequest) return send(400, { error: e.message });
+      // Malformed sealed-order envelope (zod) is a client error.
+      if ((e as { name?: string })?.name === "ZodError") {
+        return send(400, { error: "invalid order envelope" });
+      }
+      // Don't leak internals (ethers/RPC messages) to clients.
+      relay.log.error("request failed", { message: (e as Error).message });
+      send(500, { error: "internal error" });
     }
   });
 }
@@ -70,9 +115,15 @@ async function main() {
 
   const relay = new Relay({ engine, onchain, logger: new Logger() });
   const port = Number(process.env.RELAY_PORT ?? "8787");
-  createRelayServer(relay, engine).listen(port, () => {
+  const operatorToken = process.env.RELAY_OPERATOR_TOKEN?.trim() || undefined;
+  createRelayServer(relay, engine, { operatorToken }).listen(port, () => {
     console.log(`Eclipse relay listening on :${port} → engine ${engineUrl}`);
     if (!onchain) console.log("  (dry run: no RELAY_PRIVATE_KEY/settlement address — will not relay on-chain)");
+    console.log(
+      operatorToken
+        ? "  batch close: requires x-operator-token header"
+        : "  batch close: loopback-only (set RELAY_OPERATOR_TOKEN to allow remote operator)",
+    );
   });
 }
 

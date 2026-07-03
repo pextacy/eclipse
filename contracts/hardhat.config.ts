@@ -10,9 +10,10 @@ const accounts = DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [];
 
 /**
  * Solidity 0.8.x, EVM version **cancun** (required by Flare tooling — CLAUDE.md §3).
- * Contract tests run on the in-process Hardhat network against local mocks
- * (the only place simulation is allowed — CLAUDE.md §2.1); the deploy + demo
- * scripts target the real Coston2 network.
+ * Hardhat is used only to COMPILE the contracts and produce artifacts for the
+ * deploy/demo scripts, which target the real Coston2 network. The test suite is
+ * Foundry fork tests against real Coston2 — there are no mocks (see
+ * contracts/test-foundry/EclipseSettlement.t.sol).
  */
 const config: HardhatUserConfig = {
   solidity: {
