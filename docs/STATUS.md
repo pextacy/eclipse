@@ -9,7 +9,7 @@ on-chain proof that still needs a funded Coston2 key to execute.
 | **1 — Settlement + escrow** | `EclipseSettlement.sol` + `EclipseRegistry.sol`; FTSO band, conservation, nonce/replay, escrow-cover, custody guard, auto-release; **16 Foundry Coston2-fork tests green — NO MOCKS** (happy + every abuse path, against the real registry/FTSO/FXRP) | `deploy` publishes + verify; a signed `settleBatch` net transfer |
 | **2 — Sealed orders + engine + relay** | sealed-box orders (`tweetnacl`), uniform-price batch auction (exact conservation), engine signer (EIP-712), untrusted relay (zod, no plaintext logs); **9 engine + 4 relay tests green** | `demo:batch`: 4 sealed orders → one clearing price → real `settleBatch` |
 | **3 — FCC attestation** | FCC extension wrapper (`fce-sign` shape), reproducible build → deterministic code-hash (`build:reproducible`), attested-key registration model, `registerCodeHash.ts`; **6 code-hash/attestation tests green**; `tee/ATTESTATION.md` + CVM fallback + Day-11 decision | `register:codehash` whitelists the attested signer; non-whitelisted build reverts |
-| **4 — Frontend + demo** | React+Vite+wagmi/viem+Tailwind, flat/no-gradient terminal UI: trader console, **front-running comparison (concrete loss number)**, public verifier panel | drive the full flow; explorer links on every action |
+| **4 — Frontend + demo** | React + **Next.js (App Router)** + wagmi/viem + Tailwind, flat/no-gradient terminal UI: trader console (orders signed via wallet), **front-running comparison (concrete loss number)**, public verifier panel | drive the full flow; explorer links on every action |
 | **5 — Harden + submit** | all negative-path tests finalized (incl. double-withdraw); `README.md`, `DEMO.md`, `SUBMISSION.md`, this map; `docs.md` run steps updated | verified contracts + recorded video for submission |
 
 ## Test summary
@@ -28,7 +28,7 @@ tee         19 passing   (auction cross/volume/tie-break/conservation/band, STRA
                          signature recovery + replay guard, reproducible code-hash w/ pinned manifests,
                          attestation registration requiring hardware-quote verification)
 relay        4 passing   (malformed envelope rejected, no plaintext in logs, no-cross, empty batch)
-web         builds clean (vite production build + strict typecheck; flat/no-gradient verified)
+web         builds clean (next build — App Router, static prerender + strict typecheck; flat/no-gradient verified)
 ```
 
 There are **no mock contracts anywhere in the repo** — the settlement suite exercises

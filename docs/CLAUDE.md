@@ -32,7 +32,7 @@ Three Flare protocols are used together, none of them superficially:
 - **Contracts:** Solidity `0.8.x`, EVM version **cancun** (required by Flare tooling). Foundry preferred for tests; Hardhat acceptable for scripts/deploy. Use `@flarenetwork/flare-periphery-contracts/coston2/*` for interfaces (`ContractRegistry`, `FtsoV2Interface`, `IFeeCalculator`) and `@flarelabs/fasset` (`IAssetManager`) for FAssets.
 - **TEE extension:** TypeScript or Rust, scaffolded from `fce-extension-scaffold`; signing follows the `fce-sign` example. Deployed via the Coston2 FCC extension lifecycle.
 - **Backend relay:** Node.js + TypeScript. Stateless where possible; it only forwards encrypted orders to the TEE and relays signed settlements on-chain. It is untrusted by design.
-- **Frontend:** React + TypeScript + Vite, wagmi/viem for wallet + contract calls, ethers only if a lib requires it. Tailwind for styling.
+- **Frontend:** React + TypeScript + **Next.js (App Router)**, wagmi/viem for wallet + contract calls, ethers only if a lib requires it. Tailwind for styling. Wallet/contract state lives in client components under a `"use client"` boundary; env is exposed via `NEXT_PUBLIC_*`.
 - **Networks:** Coston2 (chainId `114`, RPC `https://coston2-api.flare.network/ext/C/rpc`, explorer `https://coston2-explorer.flare.network`). Songbird is a stretch target once FCC lands there.
 
 ## 4. Repo layout

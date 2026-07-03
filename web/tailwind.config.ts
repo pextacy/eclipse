@@ -5,7 +5,7 @@ import type { Config } from "tailwindcss";
  * Solid fills only. Do not add bg-gradient-* utilities or gradient tokens.
  */
 const config: Config = {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: ["./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {

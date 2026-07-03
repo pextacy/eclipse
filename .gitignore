@@ -30,3 +30,7 @@ logs/
 # deployment outputs (keep .example, ignore live)
 deployments/*.coston2.json
 !deployments/.gitkeep
+
+# next.js
+.next/
+next-env.d.ts

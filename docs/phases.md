@@ -156,7 +156,7 @@ If FCC extension registration isn't live on Coston2 in the build window: run the
 **Goal:** the **side-by-side** that wins the room. Flat design, **no gradients anywhere** (`CLAUDE.md §5`), high-contrast trading-terminal feel, monospace numbers/addresses.
 
 ### Tasks — trader console
-- React + TypeScript + Vite, wagmi/viem for wallet + contract calls, Tailwind.
+- React + TypeScript + Next.js (App Router), wagmi/viem for wallet + contract calls, Tailwind.
 - Escrow balances, submit sealed order, batch status, fills — **every action links to its Coston2 tx**.
 
 ### 🔴 Tasks — comparison view (headline screen)

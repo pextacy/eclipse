@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { Tabs, type TabDef } from "./components/Tabs";
 import { ConnectWallet } from "./components/ConnectWallet";
