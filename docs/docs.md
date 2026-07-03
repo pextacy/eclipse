@@ -124,8 +124,10 @@ event CodeHashRevoked(bytes32 indexed codeHash);
 
 ## 5. TEE matching engine
 
-- **Input:** encrypted orders `{side, baseAmount, limitPrice, account, nonce, expiry}` (sealed to the engine's attested public key).
-- **Batch auction:** every interval (default 30s), decrypt orders in-enclave, find the single uniform clearing price that maximizes matched base volume, clamp/validate against the FTSO band, and compute **net** per-account deltas in FXRP and USDT0.
+- **Input:** encrypted orders `{side, baseAmount, limitPrice, account, nonce, expiry, signature}` (sealed to the engine's attested public key).
+- **Order authentication:** each order carries an **EIP-712 signature by its `account`**. The engine verifies it in-enclave and drops any order whose signature doesn't recover to `account`, so no one can submit an order — and force a trade — against another trader's escrow. Addresses are normalized so mixed-case duplicates can't split a trader's netting.
+- **Batch auction:** every interval (default 30s), decrypt + authenticate orders in-enclave, find the single uniform clearing price (candidates = the FTSO reference, the band edges, and each limit clamped into the band) that maximizes matched base volume, and compute **net** per-account deltas in FXRP and USDT0 scaled to each token's real decimals. Dust crosses (zero-USDT0) are rejected.
+- **Replay protection:** an order `(account, nonce)` is **consumed only when it actually fills**, so unmatched orders can rest / be resubmitted for a later interval, but a settled order can't be re-executed. The batch/nonce counter is seeded from on-chain state at boot so a restart can't brick settlement. (Known limitation: the consumed-order set is in-enclave memory; a real FCC deployment seals it with enclave state — a bare-process restart within an order's expiry window would lose cross-batch order-replay protection.)
 - **Output:** a `Settlement` struct signed with the enclave key (`fce-sign`), pushed on-chain by the relay via `settleBatch`.
 - **What never leaves the enclave:** individual orders, the book, and per-order fills. Only net deltas + clearing price + FTSO reference are revealed.
 
@@ -210,15 +212,19 @@ Cases (all against the real chain):
 - **Conservation:** unbalanced net deltas → `UnbalancedBatch()`; plus `NotCommitted` / `InsufficientEscrow`.
 
 The engine/relay suites cover the uniform-price auction (including straddling crosses and dust
-rejection), sealed-box round-trips, EIP-712 signature recovery, the order-replay guard, the
-reproducible code-hash, and the untrusted-relay guarantees (no plaintext in logs).
+rejection), sealed-box round-trips, EIP-712 signature recovery, **order authentication (a forged
+order for another account is rejected)**, consume-on-fill replay behavior, account-casing
+normalization, the reproducible code-hash, the pool cap, and the untrusted-relay guarantees (no
+plaintext in logs).
 
 ## 10. Security notes
 
 - **Trust root:** hardware TEE attestation + on-chain code-hash whitelist. Compromising settlement requires forging attestation for a modified build.
 - **Operator cannot steal:** the relay/operator has no custody path; only the attested signer authorizes transfers, and only within escrowed balances.
+- **Orders are authenticated:** each order carries an EIP-712 signature by its account, verified in-enclave, so no one can move another trader's escrow by submitting an order in their name.
 - **Oracle risk:** clearing price is bounded by FTSO read in the same settlement tx, limiting the damage from any single manipulated batch.
 - **Redeemability:** a trader's idle escrow is always withdrawable, independent of governance and the signer set.
+- **Known liveness limits (not fund-loss):** the engine's cross-batch order-replay set lives in enclave memory (sealed with enclave state in a real FCC deployment); an unbacked order from a funded attacker can revert a batch it's in (griefing, bounded by the attacker revealing their own signed account); and strictly-increasing batch nonces require the engine to submit batches in order.
 
 ## 11. Roadmap (post-hackathon)
 

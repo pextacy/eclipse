@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Relay } from "../src/relay.js";
+import { OrderPool, PoolFull } from "../src/pool.js";
 import { Logger } from "../src/logger.js";
 import type { IEngineClient, BatchResponse } from "../src/engineClient.js";
 import type { SealedOrder, SignedSettlement } from "@eclipse/shared";
@@ -92,5 +93,14 @@ describe("Relay (untrusted)", () => {
     const result = await relay.closeBatch();
     expect(result.orderCount).to.equal(0);
     expect(result.crossed).to.equal(false);
+  });
+
+  it("caps the pool so a flood of valid envelopes can't grow it without bound", () => {
+    const pool = new OrderPool(new Logger(false), 2);
+    pool.accept(envelope());
+    pool.accept(envelope());
+    expect(pool.size()).to.equal(2);
+    expect(() => pool.accept(envelope())).toThrow(PoolFull);
+    expect(pool.size()).to.equal(2);
   });
 });

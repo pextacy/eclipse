@@ -52,8 +52,11 @@ export class OnChainRelay {
       const feeContract = new Contract(feeCalc, FEE_ABI, this.provider) as any;
       const fee: bigint = await feeContract.calculateFeeByIds([feedId]);
       return (this.feeCache = fee);
-    } catch {
-      return 0n; // don't cache a transient failure
+    } catch (e) {
+      // Log (not swallow) — if the contract's on-chain fee is nonzero while our
+      // read failed, settleBatch would revert InsufficientFtsoFee. Don't cache.
+      console.warn(`FTSO fee lookup failed, assuming 0: ${(e as Error).message}`);
+      return 0n;
     }
   }
 
@@ -78,10 +81,13 @@ export class OnChainRelay {
 
     const commitTx = await (this.settlement as any).commitBatch(commit, signed.commitSignature);
     await commitTx.wait();
-    // Forward the (currently 0) FTSO feed fee; the contract refunds any excess.
+    // Forward the (currently 0) FTSO feed fee plus 10% headroom in case the fee
+    // ticks up between our read and the tx being mined; the contract refunds the
+    // excess, so over-sending is safe and under-sending would revert.
     const fee = await this.ftsoFee();
+    const value = fee === 0n ? 0n : fee + fee / 10n;
     const settleTx = await (this.settlement as any).settleBatch(settlement, signed.settlementSignature, {
-      value: fee,
+      value,
     });
     await settleTx.wait();
 

@@ -9,8 +9,14 @@
  * (desk A + gas), DEMO_DESK_B_PRIVATE_KEY (desk B), ENGINE_SIGNER_PRIVATE_KEY
  * (registered in EclipseRegistry). Reads the LIVE FTSO XRP/USD feed for the band.
  */
-import { Wallet, parseUnits } from "ethers";
-import { Side, type Order } from "@eclipse/shared";
+import { Wallet, parseUnits, Contract } from "ethers";
+import {
+  Side,
+  type Order,
+  EIP712_ORDER_TYPES,
+  orderEip712Domain,
+  orderSigningValue,
+} from "@eclipse/shared";
 import { MatchingEngine, LiveFtsoReader, generateKeypair, sealOrder } from "@eclipse/tee";
 import { OnChainRelay } from "@eclipse/relay";
 import { provider, required, optional, explorerTx } from "./lib/env.js";
@@ -18,16 +24,35 @@ import { loadDeployment } from "./lib/deployments.js";
 import { erc20, typed, type SettlementDepositContract } from "./lib/contracts.js";
 
 const SETTLEMENT_DEPOSIT_ABI = ["function deposit(address token, uint256 amount)"];
+const NONCE_ABI = [
+  "function lastSettlementNonce() view returns (uint256)",
+  "function lastCommitNonce() view returns (uint256)",
+];
 
-function order(side: Side, base: bigint, limit: bigint, account: string, nonce: number): Order {
-  return {
+async function order(
+  wallet: Wallet,
+  side: Side,
+  base: bigint,
+  limit: bigint,
+  nonce: number,
+  chainId: number,
+  settlement: string,
+): Promise<Order> {
+  const o: Order = {
     side,
     baseAmount: base.toString(),
     limitPrice: limit.toString(),
-    account,
+    account: wallet.address,
     nonce: nonce.toString(),
     expiry: Math.floor(Date.now() / 1000) + 3600,
   };
+  // Authenticate the order to its account (the engine requires this).
+  const signature = await wallet.signTypedData(
+    orderEip712Domain(chainId, settlement),
+    EIP712_ORDER_TYPES as never,
+    orderSigningValue(o),
+  );
+  return { ...o, signature };
 }
 
 async function main() {
@@ -50,9 +75,15 @@ async function main() {
 
   // 2. Desk A escrows USDT0 (buyer), desk B escrows FXRP (seller).
   const qty = parseUnits("10", fxrpDec); // 10 FXRP per order, 2 orders/side = 20 FXRP
-  const usdtNeeded = (20n * ftso.value) / 10n ** BigInt(ftso.decimals); // ~20 * price, in 1e0
-  const usdtDeposit = parseUnits((usdtNeeded > 0n ? usdtNeeded : 20n).toString(), usdtDec);
-  const fxrpDeposit = qty * 2n;
+  const fxrpDeposit = qty * 2n; // 20 FXRP total on the sell side
+
+  // Desk A must escrow AT LEAST what the auction will debit. Mirror the engine's
+  // integer math exactly (in USDT0 base units), then add headroom for the
+  // clearing price landing slightly above the reference and for price drift.
+  const owed =
+    (fxrpDeposit * ftso.value * 10n ** BigInt(usdtDec)) /
+    (10n ** BigInt(fxrpDec) * 10n ** BigInt(ftso.decimals));
+  const usdtDeposit = owed + owed / 50n + 1n; // +2% headroom (idle excess stays withdrawable)
 
   const settleA = typed<SettlementDepositContract>(dep.eclipseSettlement, SETTLEMENT_DEPOSIT_ABI, deskA);
   const settleB = typed<SettlementDepositContract>(dep.eclipseSettlement, SETTLEMENT_DEPOSIT_ABI, deskB);
@@ -72,15 +103,30 @@ async function main() {
     settlementAddress: dep.eclipseSettlement,
     bandBps,
     batchTtlSeconds: 1800,
+    tokenDecimals: { base: fxrpDec, quote: usdtDec },
   });
 
-  // 4. Four sealed orders (2 buys from A, 2 sells from B).
-  const orders: Order[] = [
-    order(Side.Buy, qty, buyLimit, deskA.address, 1),
-    order(Side.Buy, qty, buyLimit, deskA.address, 2),
-    order(Side.Sell, qty, sellLimit, deskB.address, 3),
-    order(Side.Sell, qty, sellLimit, deskB.address, 4),
-  ];
+  // Resume above the highest nonce the contract already recorded, so a second
+  // demo run (or a contract with prior settlements) doesn't revert ReplayedBatch.
+  const nonceView = new Contract(dep.eclipseSettlement, NONCE_ABI, p) as unknown as {
+    lastSettlementNonce(): Promise<bigint>;
+    lastCommitNonce(): Promise<bigint>;
+  };
+  const [lastSettle, lastCommit] = await Promise.all([
+    nonceView.lastSettlementNonce(),
+    nonceView.lastCommitNonce(),
+  ]);
+  engine.seedSequence(lastSettle > lastCommit ? lastSettle : lastCommit);
+
+  // 4. Four sealed orders (2 buys from A, 2 sells from B), each signed by its desk.
+  const cid = dep.chainId;
+  const sc = dep.eclipseSettlement;
+  const orders: Order[] = await Promise.all([
+    order(deskA, Side.Buy, qty, buyLimit, 1, cid, sc),
+    order(deskA, Side.Buy, qty, buyLimit, 2, cid, sc),
+    order(deskB, Side.Sell, qty, sellLimit, 3, cid, sc),
+    order(deskB, Side.Sell, qty, sellLimit, 4, cid, sc),
+  ]);
   const sealed = await Promise.all(
     orders.map(async (o, i) => ({
       ciphertext: await sealOrder(o, keypair.publicKey),

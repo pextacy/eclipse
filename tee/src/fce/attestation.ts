@@ -64,7 +64,13 @@ export function toRegistration(
   if (bundle.provenance.kind === "dev") {
     throw new Error("refusing to register a dev-provenance signer for the deployed demo");
   }
-  if ("codeHash" in bundle.provenance && bundle.provenance.codeHash !== bundle.codeHash) {
+  // Every non-dev provenance MUST carry a code-hash that matches the build's —
+  // never skip this check just because the field is absent at runtime.
+  const provCodeHash = (bundle.provenance as { codeHash?: string }).codeHash;
+  if (!provCodeHash) {
+    throw new Error("attested provenance is missing its code-hash");
+  }
+  if (provCodeHash !== bundle.codeHash) {
     throw new Error("attested code-hash does not match the reproducible-build code-hash");
   }
   if (!bundle.quote || bundle.quote.length === 0) {

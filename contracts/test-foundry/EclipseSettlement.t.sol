@@ -419,4 +419,32 @@ contract EclipseSettlementForkTest is Test {
         vm.expectRevert();
         registry.registerCodeHash(keccak256("x"), deskA);
     }
+
+    // ─────────────────────────────────────────── deploy guards
+
+    function test_deploy_rejects_identical_tokens() public {
+        vm.expectRevert(EclipseSettlement.TokensNotDistinct.selector);
+        new EclipseSettlement(FLARE_REGISTRY, address(registry), fxrp, fxrp, XRP_USD_FEED, BAND_BPS);
+    }
+
+    function test_deploy_rejects_zero_addresses() public {
+        vm.expectRevert(EclipseSettlement.ZeroAddress.selector);
+        new EclipseSettlement(FLARE_REGISTRY, address(registry), address(0), usd, XRP_USD_FEED, BAND_BPS);
+    }
+
+    function test_commit_and_settle_reject_batchid_zero() public {
+        // batchId 0 collides with the "no open leg" sentinel and must be rejected.
+        EclipseSettlement.BatchCommit memory c = EclipseSettlement.BatchCommit({
+            batchId: 0, accounts: _accounts2(), expiry: block.timestamp + 1 hours, nonce: 1
+        });
+        bytes memory csig = _signCommit(ENGINE_PK, c);
+        vm.expectRevert(EclipseSettlement.InvalidBatchId.selector);
+        settlement.commitBatch(c, csig);
+
+        EclipseSettlement.Settlement memory s = _happySettlement(block.timestamp + 1 hours);
+        s.batchId = 0;
+        bytes memory ssig = _signSettlement(ENGINE_PK, s);
+        vm.expectRevert(EclipseSettlement.InvalidBatchId.selector);
+        settlement.settleBatch(s, ssig);
+    }
 }

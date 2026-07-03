@@ -24,6 +24,37 @@ const NONCE_ABI = [
   "function lastSettlementNonce() view returns (uint256)",
   "function lastCommitNonce() view returns (uint256)",
 ];
+const TOKENS_ABI = [
+  "function fxrp() view returns (address)",
+  "function usdt0() view returns (address)",
+];
+const DECIMALS_ABI = ["function decimals() view returns (uint8)"];
+
+/**
+ * Read the ACTUAL on-chain decimals of the escrow tokens so the auction converts
+ * FXRP volume × USD price into the quote token's real base units. Both are 6 for
+ * the real FXRP/USDT0, but a differently-scaled quote token (e.g. 18-dp) would
+ * otherwise mis-scale every USDT0 delta. Best-effort → 6/6 on any failure.
+ */
+async function readTokenDecimals(
+  rpc: string,
+  settlementAddress: string,
+): Promise<{ base: number; quote: number }> {
+  const fallback = { base: 6, quote: 6 };
+  if (!settlementAddress || settlementAddress === ZERO_ADDR) return fallback;
+  try {
+    const provider = new JsonRpcProvider(rpc);
+    const s = new Contract(settlementAddress, TOKENS_ABI, provider) as any;
+    const [fxrpAddr, quoteAddr] = await Promise.all([s.fxrp(), s.usdt0()]);
+    const [base, quote] = await Promise.all([
+      (new Contract(fxrpAddr, DECIMALS_ABI, provider) as any).decimals(),
+      (new Contract(quoteAddr, DECIMALS_ABI, provider) as any).decimals(),
+    ]);
+    return { base: Number(base), quote: Number(quote) };
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * Resume the batch counter above the highest nonce the settlement contract has
@@ -69,6 +100,8 @@ async function buildEngine(): Promise<MatchingEngine> {
   const settlementAddress = env("ECLIPSE_SETTLEMENT_ADDRESS", "0x0000000000000000000000000000000000000000");
   const bandBps = BigInt(env("BAND_BPS", String(DEFAULT_BAND_BPS)));
   const batchTtlSeconds = Number(env("BATCH_INTERVAL_SECONDS", String(DEFAULT_BATCH_INTERVAL_SECONDS))) * 4;
+  const rpc = env("COSTON2_RPC", "https://coston2-api.flare.network/ext/C/rpc");
+  const tokenDecimals = await readTokenDecimals(rpc, settlementAddress);
 
   // Real feed by default; a static reference only if explicitly requested for a
   // network-free local demo (never in the deployed settlement path).
@@ -84,6 +117,7 @@ async function buildEngine(): Promise<MatchingEngine> {
     settlementAddress,
     bandBps,
     batchTtlSeconds,
+    tokenDecimals,
   });
 }
 

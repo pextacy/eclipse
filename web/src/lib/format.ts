@@ -66,7 +66,11 @@ export function fmtUsd(n: number, frac = 2): string {
   return `$${fmtNum(n, frac)}`;
 }
 
-/** FTSO price value (value * 10^decimals) → human number. */
-export function ftsoToNumber(value: bigint, decimals = 5): number {
+/**
+ * FTSO price value (value * 10^decimals) → human number. Defaults to 6, the
+ * decimals of the Coston2 XRP/USD feed (getFeedById returns 6). Using the wrong
+ * scale would misprint the clearing price by a power of ten.
+ */
+export function ftsoToNumber(value: bigint, decimals = 6): number {
   return Number(value) / 10 ** decimals;
 }

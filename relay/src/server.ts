@@ -11,11 +11,19 @@
  *   POST /batch/close          → close the batch, relay settlement on-chain
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import "dotenv/config";
 import { Relay } from "./relay.js";
 import { EngineClient } from "./engineClient.js";
 import { OnChainRelay } from "./onchain.js";
 import { Logger } from "./logger.js";
+
+/** Constant-time string compare (hash to normalize length first). */
+function secretEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 /** Cap intake body size so an unauthenticated POST can't exhaust memory. */
 const MAX_BODY_BYTES = 256 * 1024;
@@ -63,8 +71,11 @@ export function createRelayServer(relay: Relay, engine: EngineClient, opts: Rela
   // none is configured) restrict to loopback for local demos.
   const authorizedToClose = (req: IncomingMessage) => {
     if (opts.operatorToken) {
-      return req.headers["x-operator-token"] === opts.operatorToken;
+      const provided = req.headers["x-operator-token"];
+      return typeof provided === "string" && secretEqual(provided, opts.operatorToken);
     }
+    // Loopback fallback is only safe when the process listens on 127.0.0.1 with
+    // no reverse proxy in front (see main() — it binds to localhost in this mode).
     return isLoopback(req);
   };
 
@@ -88,10 +99,11 @@ export function createRelayServer(relay: Relay, engine: EngineClient, opts: Rela
       send(404, { error: "not found" });
     } catch (e) {
       if (e instanceof BadRequest) return send(400, { error: e.message });
+      const name = (e as { name?: string })?.name;
       // Malformed sealed-order envelope (zod) is a client error.
-      if ((e as { name?: string })?.name === "ZodError") {
-        return send(400, { error: "invalid order envelope" });
-      }
+      if (name === "ZodError") return send(400, { error: "invalid order envelope" });
+      // Pool is full — a retryable client condition, not a server fault.
+      if (name === "PoolFull") return send(429, { error: "order pool is full" });
       // Don't leak internals (ethers/RPC messages) to clients.
       relay.log.error("request failed", { message: (e as Error).message });
       send(500, { error: "internal error" });
@@ -116,13 +128,18 @@ async function main() {
   const relay = new Relay({ engine, onchain, logger: new Logger() });
   const port = Number(process.env.RELAY_PORT ?? "8787");
   const operatorToken = process.env.RELAY_OPERATOR_TOKEN?.trim() || undefined;
-  createRelayServer(relay, engine, { operatorToken }).listen(port, () => {
-    console.log(`Eclipse relay listening on :${port} → engine ${engineUrl}`);
+  // Without an operator token, bind to localhost ONLY so /batch/close cannot be
+  // reached from off-box (a reverse proxy would make every request look like
+  // loopback and let anyone force-close a batch). With a token, bind to all
+  // interfaces so a remote operator can authenticate.
+  const host = operatorToken ? "0.0.0.0" : "127.0.0.1";
+  createRelayServer(relay, engine, { operatorToken }).listen(port, host, () => {
+    console.log(`Eclipse relay listening on ${host}:${port} → engine ${engineUrl}`);
     if (!onchain) console.log("  (dry run: no RELAY_PRIVATE_KEY/settlement address — will not relay on-chain)");
     console.log(
       operatorToken
-        ? "  batch close: requires x-operator-token header"
-        : "  batch close: loopback-only (set RELAY_OPERATOR_TOKEN to allow remote operator)",
+        ? "  batch close: requires x-operator-token header (bound to 0.0.0.0)"
+        : "  batch close: loopback-only, bound to 127.0.0.1 (set RELAY_OPERATOR_TOKEN for remote operator)",
     );
   });
 }

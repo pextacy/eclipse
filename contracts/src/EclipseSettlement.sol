@@ -106,6 +106,8 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     error InsufficientFtsoFee();
     error RefundFailed();
     error ZeroAddress();
+    error TokensNotDistinct();
+    error InvalidBatchId();
 
     // ─────────────────────────────────────────── events
 
@@ -131,6 +133,9 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
             _flareRegistry == address(0) || _eclipseRegistry == address(0) || _fxrp == address(0)
                 || _usdt0 == address(0)
         ) revert ZeroAddress();
+        // The two escrow tokens must be distinct — a shared address would collide
+        // their escrow ledgers and let one leg's delta spend the other's balance.
+        if (_fxrp == _usdt0) revert TokensNotDistinct();
         flareRegistry = IFlareContractRegistry(_flareRegistry);
         eclipseRegistry = IEclipseRegistry(_eclipseRegistry);
         fxrp = _fxrp;
@@ -141,14 +146,20 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
 
     // ─────────────────────────────────────────── deposit / withdraw
 
-    /// @notice Escrow real FXRP or USDT0 into the caller's account.
+    /// @notice Escrow real FXRP or USDT0 into the caller's account. Credits the
+    /// amount ACTUALLY received, so a fee-on-transfer token (FAssets can enable a
+    /// transfer fee) can never leave escrow crediting more than the contract holds.
     function deposit(address token, uint256 amount) external nonReentrant {
         _requireSupported(token);
         if (amount == 0) revert ZeroAmount();
 
-        escrow[msg.sender][token] += amount;
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        emit Deposited(msg.sender, token, amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balBefore;
+        if (received == 0) revert ZeroAmount();
+
+        escrow[msg.sender][token] += received;
+        emit Deposited(msg.sender, token, received);
     }
 
     /// @notice Withdraw idle escrow. Reverts while the caller has an open matched
@@ -173,6 +184,10 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     /// pulled mid-batch. Signed by the attested engine. Only the participant set
     /// is revealed — never sides, amounts, prices, or fills.
     function commitBatch(BatchCommit calldata c, bytes calldata signature) external {
+        // batchId 0 is the "no open leg" sentinel — a batch may never use it, or
+        // the commit lock would silently no-op and settlement could apply deltas
+        // to accounts that were never committed.
+        if (c.batchId == 0) revert InvalidBatchId();
         if (block.timestamp > c.expiry) revert BatchExpired();
         if (c.accounts.length == 0) revert EmptyBatch();
         if (c.nonce <= lastCommitNonce) revert ReplayedBatch();
@@ -200,6 +215,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         payable
         nonReentrant
     {
+        if (s.batchId == 0) revert InvalidBatchId();
         if (block.timestamp > s.expiry) revert BatchExpired();
         if (s.nonce <= lastSettlementNonce) revert ReplayedBatch();
 

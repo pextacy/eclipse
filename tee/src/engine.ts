@@ -1,7 +1,11 @@
+import { verifyTypedData, type TypedDataField } from "ethers";
 import type { Order, SealedOrder, Settlement, BatchCommit, SignedSettlement } from "@eclipse/shared";
-import { runAuction, type FtsoRef, type AuctionResult } from "./auction.js";
+import { EIP712_ORDER_TYPES, orderEip712Domain, orderSigningValue } from "@eclipse/shared";
+import { runAuction, type FtsoRef, type AuctionResult, type TokenDecimals } from "./auction.js";
 import { openOrder, type SealedKeypair } from "./seal.js";
 import { EngineSigner } from "./signer.js";
+
+const ORDER_TYPES = EIP712_ORDER_TYPES as unknown as Record<string, TypedDataField[]>;
 
 /** Reads the live FTSO XRP/USD reference. Live impl reads Coston2; tests stub it. */
 export interface FtsoReader {
@@ -14,6 +18,14 @@ export interface EngineConfig {
   bandBps: bigint;
   /** How long after clearing the signed batch stays valid on-chain. */
   batchTtlSeconds: number;
+  /** On-chain decimals of FXRP (base) and the quote token. Defaults to 6/6. */
+  tokenDecimals?: TokenDecimals;
+  /**
+   * Require each order to carry a valid EIP-712 signature from its `account`
+   * (default true). Prevents anyone from submitting an order — and forcing a
+   * trade — against another trader's escrow. Only tests set this false.
+   */
+  requireSignedOrders?: boolean;
   /** Injected clock (seconds). Defaults to wall clock; tests can pin it. */
   now?: () => number;
 }
@@ -75,6 +87,18 @@ export class MatchingEngine {
     return this.cfg.now ? this.cfg.now() : Math.floor(Date.now() / 1000);
   }
 
+  /** True iff `o.signature` is a valid EIP-712 order signature by `account`. */
+  private orderSignerMatches(o: Order, account: string): boolean {
+    if (!o.signature) return false;
+    try {
+      const domain = orderEip712Domain(this.cfg.chainId, this.cfg.settlementAddress);
+      const recovered = verifyTypedData(domain, ORDER_TYPES, orderSigningValue(o), o.signature);
+      return recovered.toLowerCase() === account;
+    } catch {
+      return false;
+    }
+  }
+
   /** Decrypt a sealed envelope inside the enclave. */
   async open(sealed: SealedOrder): Promise<Order> {
     return openOrder(sealed.ciphertext, this.keypair);
@@ -93,17 +117,32 @@ export class MatchingEngine {
     }
 
     const orders: Order[] = [];
+    const seenThisBatch = new Set<string>();
+    const expiryByKey = new Map<string, number>();
     for (const s of sealedOrders) {
       try {
         const o = await this.open(s);
         if (o.expiry <= now) continue; // expired
-        // Replay guard: each sealed order (account, nonce) is one-shot. The
-        // untrusted relay can resubmit the same ciphertext; we match it at most
-        // once. A trader who wasn't filled resubmits a fresh order (new nonce).
-        const key = `${o.account.toLowerCase()}:${o.nonce.toString()}`;
+        // Normalize the address so mixed-case duplicates can't split a trader's
+        // netting (which would revert the whole batch on-chain), and so it keys
+        // the guards consistently.
+        const account = o.account.toLowerCase();
+        // Authenticate the order to its account (unless a test disables it) so no
+        // one can force a trade against another trader's escrow.
+        if (this.cfg.requireSignedOrders !== false && !this.orderSignerMatches(o, account)) {
+          continue;
+        }
+        const key = `${account}:${o.nonce.toString()}`;
+        // Already FILLED in a prior batch → one-shot, drop it (replay guard).
         if (this.consumed.has(key)) continue;
-        this.consumed.set(key, o.expiry);
-        orders.push(o);
+        // Duplicate within THIS batch → drop, so a relay can't inflate a side by
+        // resubmitting one ciphertext multiple times in the same interval.
+        if (seenThisBatch.has(key)) continue;
+        seenThisBatch.add(key);
+        // Cap retained expiry so an order with an absurd far-future expiry can't
+        // pin a consumed-guard entry in memory forever.
+        expiryByKey.set(key, Math.min(o.expiry, now + this.cfg.batchTtlSeconds * 4));
+        orders.push({ ...o, account });
       } catch {
         // Undecryptable / malformed ciphertext is silently dropped — the relay
         // cannot read it and neither will we leak why.
@@ -111,11 +150,20 @@ export class MatchingEngine {
     }
 
     const ftso = await this.reader.read();
-    const auction = runAuction(orders, ftso, this.cfg.bandBps);
+    const auction = runAuction(orders, ftso, this.cfg.bandBps, this.cfg.tokenDecimals);
     const batchId = ++this.seq;
 
     if (!auction.crossed || auction.deltas.length === 0) {
+      // Nothing crossed — consume NOTHING. Unmatched orders may rest / be
+      // resubmitted for a later interval (a real counterparty may still arrive).
       return { crossed: false, auction, batchId };
+    }
+
+    // Consume ONLY the orders that actually filled, so double-execution of a
+    // settled order is prevented while resting orders survive.
+    for (const f of auction.filled) {
+      const key = `${f.account}:${f.nonce.toString()}`;
+      this.consumed.set(key, expiryByKey.get(key) ?? now + this.cfg.batchTtlSeconds * 4);
     }
 
     const expiry = BigInt(now + this.cfg.batchTtlSeconds);

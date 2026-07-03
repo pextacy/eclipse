@@ -62,6 +62,20 @@ describe("runAuction", () => {
     expect(conserves(r.deltas)).to.equal(true);
   });
 
+  it("scales USDT0 to the quote token's decimals (18-dp quote)", () => {
+    const orders = [
+      order(Side.Buy, "100000000", "50000000", A), // 100 FXRP (6dp) @ 0.5
+      order(Side.Sell, "100000000", "50000000", B),
+    ];
+    const r = runAuction(orders, FTSO, BAND, { base: 6, quote: 18 });
+    expect(r.crossed).to.equal(true);
+    expect(r.matchedVolume).to.equal(100_000_000n);
+    // 100 FXRP × 0.5 = 50 USD → at 18 decimals that is 50 * 10^18.
+    const buyer = r.deltas.find((d) => d.account === A)!;
+    expect(buyer.usdt0Delta).to.equal(-50_000_000_000_000_000_000n);
+    expect(conserves(r.deltas)).to.equal(true);
+  });
+
   it("rejects a dust cross that would move FXRP for zero USDT0", () => {
     // volume * price / scale rounds to 0 USDT0 → no free fills.
     const orders = [

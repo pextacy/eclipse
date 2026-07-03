@@ -4,9 +4,16 @@ import {
   useReadContract,
   useWriteContract,
   usePublicClient,
+  useSignTypedData,
 } from "wagmi";
 import nacl from "tweetnacl";
-import { Side, type Order } from "@eclipse/shared";
+import {
+  Side,
+  type Order,
+  EIP712_ORDER_TYPES,
+  orderEip712Domain,
+  orderSigningValue,
+} from "@eclipse/shared";
 import { Panel } from "../components/Panel";
 import { StatTile } from "../components/StatTile";
 import { MonoNumber } from "../components/MonoNumber";
@@ -21,6 +28,11 @@ interface EnginePubkey {
   publicKey: string;
   signerAddress: string;
 }
+
+// Decimals of the Coston2 XRP/USD FTSO feed (getFeedById returns 6). The sealed
+// order's limitPrice MUST use this same scale as the engine's live reference, or
+// every order would be mis-scaled by a power of ten and never cross the band.
+const FTSO_PRICE_DECIMALS = 6;
 
 export function TraderConsole() {
   const { address, isConnected } = useAccount();
@@ -281,6 +293,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   const [ciphertext, setCiphertext] = useState<string>("");
   const [submitState, setSubmitState] = useState<string>("");
   const [usingDemoKey, setUsingDemoKey] = useState(false);
+  const { signTypedDataAsync } = useSignTypedData();
 
   // Try to fetch the engine sealed-box public key from the relay.
   useEffect(() => {
@@ -312,7 +325,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
     let price: string;
     try {
       base = parseUnits(baseAmount, 6).toString();
-      price = parseUnits(limitPrice, 5).toString();
+      price = parseUnits(limitPrice, FTSO_PRICE_DECIMALS).toString();
     } catch {
       return null;
     }
@@ -326,11 +339,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
     };
   }, [account, baseAmount, limitPrice, side]);
 
-  function seal(): { ciphertext: string; enginePublicKey: string } | null {
-    if (!previewOrder) {
-      setSubmitState("Invalid amount/price.");
-      return null;
-    }
+  function seal(order: Order): { ciphertext: string; enginePublicKey: string } {
     // Real engine key if the relay is up; otherwise an ephemeral demo key so the
     // user can still SEE that a sealed ciphertext reveals nothing.
     let pk = engine?.publicKey;
@@ -341,15 +350,38 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
     } else {
       setUsingDemoKey(false);
     }
-    const ct = sealOrder(previewOrder, pk);
+    const ct = sealOrder(order, pk);
     setCiphertext(ct);
     return { ciphertext: ct, enginePublicKey: pk };
   }
 
   async function submit() {
+    if (!previewOrder) {
+      setSubmitState("Invalid amount/price.");
+      return;
+    }
+    // Authenticate the order to the connected wallet so nobody can submit an
+    // order (and force a trade) against another trader's escrow. The engine
+    // rejects any order whose signature doesn't recover to `account`.
+    let signedOrder: Order;
+    try {
+      setSubmitState("Sign the order in your wallet…");
+      const domain = orderEip712Domain(deployment.chainId, deployment.eclipseSettlement);
+      const value = orderSigningValue(previewOrder);
+      const signature = await signTypedDataAsync({
+        domain: { ...domain, verifyingContract: deployment.eclipseSettlement },
+        types: EIP712_ORDER_TYPES,
+        primaryType: "Order",
+        message: { ...value, account: previewOrder.account as `0x${string}`, side: Number(value.side) },
+      });
+      signedOrder = { ...previewOrder, signature };
+    } catch (e) {
+      setSubmitState(`Signature rejected: ${(e as Error).message}`);
+      return;
+    }
+
     setSubmitState("Sealing…");
-    const sealed = seal();
-    if (!sealed) return;
+    const sealed = seal(signedOrder);
     if (!engine) {
       setSubmitState("Relay offline — order sealed locally (not submitted). Ciphertext preview below.");
       return;
@@ -366,8 +398,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`relay ${res.status}`);
-      const body = (await res.json()) as { accepted?: boolean; pool?: number };
-      setSubmitState(`Accepted by relay (pool size ${body.pool ?? "?"}). Order stays sealed until the batch runs in the TEE.`);
+      setSubmitState("Accepted by relay. Order stays sealed until the batch runs in the TEE.");
     } catch (e) {
       setSubmitState(`Submit failed: ${(e as Error).message}. Ciphertext preview below proves nothing leaked.`);
     }
@@ -416,7 +447,16 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
         </div>
 
         <div className="flex gap-2">
-          <button type="button" className="btn flex-1" onClick={() => seal()}>
+          <button
+            type="button"
+            className="btn flex-1"
+            onClick={() => {
+              // Preview only — seals the (unsigned) order to show the ciphertext
+              // reveals nothing. Submission signs it first.
+              if (previewOrder) seal(previewOrder);
+              else setSubmitState("Invalid amount/price.");
+            }}
+          >
             Seal preview
           </button>
           <button type="button" className="btn btn-accent flex-1" onClick={submit}>
@@ -560,9 +600,9 @@ function BatchFills() {
               {rows.map((r) => (
                 <tr key={r.txHash} className="border-t border-line">
                   <Td>#{r.batchId.toString()}</Td>
-                  <Td>{(Number(r.clearingPrice) / 1e5).toFixed(5)}</Td>
-                  <Td>{(Number(r.ftsoRef) / 1e5).toFixed(5)}</Td>
-                  <Td>{(Number(r.ftsoOnChain) / 1e5).toFixed(5)}</Td>
+                  <Td>{(Number(r.clearingPrice) / 10 ** FTSO_PRICE_DECIMALS).toFixed(5)}</Td>
+                  <Td>{(Number(r.ftsoRef) / 10 ** FTSO_PRICE_DECIMALS).toFixed(5)}</Td>
+                  <Td>{(Number(r.ftsoOnChain) / 10 ** FTSO_PRICE_DECIMALS).toFixed(5)}</Td>
                   <Td>
                     <AddressLink address={r.signer} showCopy={false} />
                   </Td>
