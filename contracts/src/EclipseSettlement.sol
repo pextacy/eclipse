@@ -8,9 +8,12 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 import {IEclipseRegistry} from "./interfaces/IEclipseRegistry.sol";
-import {IFlareContractRegistry} from "./interfaces/flare/IFlareContractRegistry.sol";
-import {IFtsoV2} from "./interfaces/flare/IFtsoV2.sol";
-import {IFeeCalculator} from "./interfaces/flare/IFeeCalculator.sol";
+// Canonical Flare interfaces from the official periphery package (CLAUDE.md §3),
+// not hand-rolled — these match the real Coston2 deployments exactly.
+import {IFlareContractRegistry} from
+    "@flarenetwork/flare-periphery-contracts/coston2/IFlareContractRegistry.sol";
+import {FtsoV2Interface} from "@flarenetwork/flare-periphery-contracts/coston2/FtsoV2Interface.sol";
+import {IFeeCalculator} from "@flarenetwork/flare-periphery-contracts/coston2/IFeeCalculator.sol";
 
 /// @title EclipseSettlement
 /// @notice Trustless escrow + net settlement for the Eclipse confidential dark
@@ -316,7 +319,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     /// @dev Reads the live FTSO XRP/USD value, forwarding the (currently 0) fee.
     /// Returns the value and any msg.value to refund to the caller.
     function _readFtsoValue() private returns (uint256 value, uint256 refund) {
-        IFtsoV2 ftso = IFtsoV2(flareRegistry.getContractAddressByName(_FTSO_NAME));
+        FtsoV2Interface ftso = FtsoV2Interface(flareRegistry.getContractAddressByName(_FTSO_NAME));
         uint256 fee = _ftsoFee();
         if (msg.value < fee) revert InsufficientFtsoFee();
         (value,,) = ftso.getFeedById{value: fee}(xrpUsdFeedId);

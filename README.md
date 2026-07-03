@@ -28,7 +28,9 @@ price is provably fair against the FTSOv2 XRP/USD feed.
 ## Monorepo layout
 
 ```
-contracts/   Solidity — EclipseSettlement.sol, EclipseRegistry.sol, Flare interfaces
+contracts/   Solidity — EclipseSettlement.sol, EclipseRegistry.sol, IEclipseRegistry.
+             Flare interfaces come from the official @flarenetwork/flare-periphery-contracts
+             (coston2) package — canonical, not hand-rolled (CLAUDE.md §3).
              test-foundry/ — Coston2 fork tests (real chain, no mocks); lib/forge-std
 tee/         Matching engine: sealed orders, batch auction, signer, FCC extension + reproducible build
 relay/       Untrusted backend: order intake, engine transport, on-chain relay
