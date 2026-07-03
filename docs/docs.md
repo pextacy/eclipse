@@ -150,30 +150,41 @@ Everything else (FtsoV2, AssetManager, FXRP, USDT0) is resolved at runtime from 
 ## 8. Running it
 
 ```bash
-# 1. Install
+# 1. Install + build shared types
 pnpm install
-forge install            # or: npm i for the hardhat path
+pnpm --filter @eclipse/shared build
 
 # 2. Fund the deployer from the Coston2 faucet (C2FLR + FXRP + USDT0), confirm on explorer
+cp .env.example .env       # then fill in the keys
 
-# 3. Resolve live addresses (no hardcoding) and sanity-check FXRP transfer
-pnpm ts-node scripts/resolveAddresses.ts
+# 3. Resolve live addresses (no hardcoding) and sanity-check an FXRP transfer
+pnpm --filter @eclipse/scripts resolve
+TO_ADDRESS=0x... pnpm --filter @eclipse/scripts transfer:fxrp
 
-# 4. Deploy contracts to Coston2 and verify on the explorer
-pnpm ts-node scripts/deploy.ts --network coston2
+# 4. Deploy contracts to Coston2 (writes deployments/coston2.json), then verify
+pnpm --filter @eclipse/contracts build
+pnpm --filter @eclipse/scripts deploy
+pnpm --filter @eclipse/contracts exec hardhat verify --network coston2 <settlement> <args...>
 
 # 5. Build the TEE extension reproducibly and register its code-hash
 #    (SOURCE_DATE_EPOCH pinned so the code-hash matches the on-chain whitelist)
-pnpm --filter tee build:reproducible
-pnpm ts-node scripts/registerCodeHash.ts --network coston2
+SOURCE_DATE_EPOCH=1700000000 pnpm --filter @eclipse/tee build:reproducible
+ENGINE_CODE_HASH=<hash> ENGINE_SIGNER_ADDRESS=<attested signer> \
+  pnpm --filter @eclipse/scripts register:codehash
 
 # 6. Start relay + engine, then run a batch
-pnpm --filter relay start
-pnpm ts-node scripts/submitDemoBatch.ts   # 4 sealed orders → one clearing price → settleBatch
+pnpm --filter @eclipse/tee start
+pnpm --filter @eclipse/relay start
+pnpm --filter @eclipse/scripts demo:batch   # 4 sealed orders → one clearing price → settleBatch
 
 # 7. Frontend
-pnpm --filter web dev
+pnpm --filter @eclipse/web dev
 ```
+
+> Local test suites (no network): `pnpm --filter @eclipse/contracts test`,
+> `pnpm --filter @eclipse/tee test`, `pnpm --filter @eclipse/relay test`.
+> Toolchain note: the runnable contract tests are Hardhat + TypeScript (Foundry
+> is optional via `contracts/foundry.toml`) — see `README.md`.
 
 ## 9. Testing
 

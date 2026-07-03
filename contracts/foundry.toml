@@ -1,0 +1,20 @@
+# Foundry config (for contributors who have Foundry installed).
+# The runnable, CI-backed test suite is Hardhat + TypeScript (see ../test/contracts),
+# because Foundry/Rust is not part of this project's pinned Node toolchain.
+# Kept here so `forge build` / `forge fmt` work and to satisfy CLAUDE.md §3's
+# "Foundry preferred for tests" for anyone who has it.
+[profile.default]
+src = "src"
+out = "out"
+libs = ["node_modules"]
+solc = "0.8.25"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+    "@openzeppelin/=node_modules/@openzeppelin/",
+]
+
+[fmt]
+line_length = 100
+tab_width = 4

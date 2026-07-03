@@ -2,3 +2,31 @@
 node_modules/
 .env
 *.local
+
+# build artifacts
+dist/
+build/
+out/
+cache/
+artifacts/
+coverage/
+typechain-types/
+*.tsbuildinfo
+
+# hardhat / foundry
+contracts/cache/
+contracts/artifacts/
+contracts/typechain-types/
+broadcast/
+
+# tee / relay secrets
+tee/keys/*.key
+relay/.runtime/
+
+# logs
+*.log
+logs/
+
+# deployment outputs (keep .example, ignore live)
+deployments/*.coston2.json
+!deployments/.gitkeep

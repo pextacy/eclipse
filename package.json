@@ -1,0 +1,33 @@
+{
+  "name": "eclipse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eclipse — a confidential dark pool for FXRP on Flare (Coston2).",
+  "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "shared",
+    "contracts",
+    "tee",
+    "relay",
+    "web",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "pnpm --filter @eclipse/shared build && pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test",
+    "test:contracts": "pnpm --filter @eclipse/contracts test",
+    "test:tee": "pnpm --filter @eclipse/tee test",
+    "test:relay": "pnpm --filter @eclipse/relay test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "resolve": "pnpm --filter @eclipse/scripts resolve",
+    "deploy:coston2": "pnpm --filter @eclipse/scripts deploy",
+    "demo:batch": "pnpm --filter @eclipse/scripts demo:batch"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

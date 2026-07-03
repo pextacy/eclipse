@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @eclipse/shared build
+
+      - name: Compile contracts
+        run: pnpm --filter @eclipse/contracts build
+
+      - name: Contract tests (happy + abuse paths)
+        run: pnpm --filter @eclipse/contracts test
+
+      - name: Engine tests
+        run: pnpm --filter @eclipse/tee test
+
+      - name: Relay tests
+        run: pnpm --filter @eclipse/relay test
+
+      - name: Typecheck
+        run: pnpm -r --if-present typecheck
+
+      - name: Secret scan (no committed private keys)
+        run: |
+          if git grep -nE '(DEPLOYER_PRIVATE_KEY|PRIVATE_KEY)\s*=\s*0x[0-9a-fA-F]{64}' -- . ':!*.example'; then
+            echo "::error::A private key looks committed."; exit 1
+          fi
+          echo "No committed secrets found."
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @eclipse/shared build
+      - run: pnpm --filter @eclipse/web build

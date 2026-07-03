@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    margin: 0;
+    /* Flat: a single solid fill. No gradients. */
+    background-color: #0a0a0a;
+  }
+
+  /* Monospace for all numbers, addresses, prices and hashes. */
+  .mono {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-panel border border-line;
+  }
+
+  .hairline {
+    @apply border-line;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 border border-line-strong
+      bg-panel-2 px-3 py-2 text-sm text-ink transition-colors
+      hover:border-eclipse hover:text-eclipse
+      disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-ink;
+  }
+
+  .btn-accent {
+    @apply border-eclipse bg-eclipse-dim text-eclipse hover:bg-eclipse hover:text-bg;
+  }
+
+  .btn-loss {
+    @apply border-loss bg-loss-dim text-loss hover:bg-loss hover:text-bg;
+  }
+
+  .input {
+    @apply w-full border border-line bg-surface px-3 py-2 font-mono text-sm text-ink
+      outline-none placeholder:text-muted focus:border-eclipse;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .label {
+    @apply block text-2xs uppercase tracking-wider text-muted;
+  }
+
+  .tag {
+    @apply inline-flex items-center border border-line px-1.5 py-0.5 font-mono text-2xs uppercase tracking-wide;
+  }
+}
+
+/* Terminal scrollbars — flat, no gradient. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #232a35;
+  border: 2px solid #0a0a0a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2f3846;
+}

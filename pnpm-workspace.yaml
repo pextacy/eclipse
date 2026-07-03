@@ -1,0 +1,7 @@
+packages:
+  - "contracts"
+  - "tee"
+  - "relay"
+  - "web"
+  - "scripts"
+  - "shared"

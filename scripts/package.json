@@ -1,0 +1,26 @@
+{
+  "name": "@eclipse/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "resolve": "tsx src/resolveAddresses.ts",
+    "transfer:fxrp": "tsx src/transferFxrp.ts",
+    "deploy": "tsx src/deploy.ts",
+    "register:codehash": "tsx src/registerCodeHash.ts",
+    "demo:batch": "tsx src/submitDemoBatch.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@eclipse/relay": "workspace:*",
+    "@eclipse/shared": "workspace:*",
+    "@eclipse/tee": "workspace:*",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
