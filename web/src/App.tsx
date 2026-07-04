@@ -8,6 +8,7 @@ import { AddressLink } from "./components/AddressLink";
 import { TraderConsole } from "./views/TraderConsole";
 import { ComparisonView } from "./views/ComparisonView";
 import { VerifierPanel } from "./views/VerifierPanel";
+import { BatchesView } from "./views/BatchesView";
 import { eclipseSettlementAbi } from "./lib/abis";
 import { deployment, isConfigured } from "./lib/deployment";
 
@@ -31,6 +32,7 @@ function TradingPausedBanner() {
 const TABS: TabDef[] = [
   { id: "compare", label: "Comparison", hint: "why it matters" },
   { id: "trade", label: "Trader Console", hint: "seal & settle" },
+  { id: "batches", label: "Batches", hint: "fair over time" },
   { id: "verify", label: "Verifier", hint: "prove it" },
 ];
 
@@ -74,6 +76,7 @@ export function App() {
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-6">
         {tab === "compare" && <ComparisonView />}
         {tab === "trade" && <TraderConsole />}
+        {tab === "batches" && <BatchesView />}
         {tab === "verify" && <VerifierPanel />}
       </main>
 

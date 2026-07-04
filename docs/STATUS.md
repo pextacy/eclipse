@@ -31,7 +31,8 @@ tee         24 passing   (auction cross/volume/tie-break/conservation/band, STRA
 relay        7 passing   (malformed envelope rejected, no plaintext in logs, no-cross, empty batch,
                          pool cap, auto-close scheduler, batch-status without pool-size leak)
 web         builds clean (next build — App Router, static prerender + strict typecheck; flat/no-gradient
-                         verified; network guard, release-expired-leg, trading-paused banner)
+                         verified; 4 tabs incl. Batches analytics — clearing-vs-FTSO fairness chart;
+                         network guard, release-expired-leg, trading-paused banner)
 ```
 
 There are **no mock contracts anywhere in the repo** — the settlement suite exercises
