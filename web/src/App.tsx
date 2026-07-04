@@ -1,13 +1,32 @@
 "use client";
 
 import { useState } from "react";
+import { useReadContract } from "wagmi";
 import { Tabs, type TabDef } from "./components/Tabs";
 import { ConnectWallet } from "./components/ConnectWallet";
 import { AddressLink } from "./components/AddressLink";
 import { TraderConsole } from "./views/TraderConsole";
 import { ComparisonView } from "./views/ComparisonView";
 import { VerifierPanel } from "./views/VerifierPanel";
+import { eclipseSettlementAbi } from "./lib/abis";
 import { deployment, isConfigured } from "./lib/deployment";
+
+/** Global banner shown when the guardian has halted matching (custody stays open). */
+function TradingPausedBanner() {
+  const paused = useReadContract({
+    address: deployment.eclipseSettlement,
+    abi: eclipseSettlementAbi,
+    functionName: "tradingPaused",
+    query: { enabled: isConfigured, refetchInterval: 12000 },
+  });
+  if (paused.data !== true) return null;
+  return (
+    <div className="border-b border-warn bg-loss-dim px-5 py-2 text-center text-xs text-warn">
+      ⚠ Trading is paused by the guardian — new batches are halted. Your escrow is unaffected:
+      deposits, withdrawals and expired-leg release stay open.
+    </div>
+  );
+}
 
 const TABS: TabDef[] = [
   { id: "compare", label: "Comparison", hint: "why it matters" },
@@ -47,6 +66,8 @@ export function App() {
           <ConnectWallet />
         </div>
       </header>
+
+      <TradingPausedBanner />
 
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
 

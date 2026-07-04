@@ -7,7 +7,7 @@
  *
  * Then verify the source on the Blockscout explorer from the contracts package:
  *   pnpm --filter @eclipse/contracts exec hardhat verify --network coston2 <settlement> \
- *     <flareRegistry> <eclipseRegistry> <fxrp> <usdt0> <feedId> <bandBps>
+ *     <flareRegistry> <eclipseRegistry> <fxrp> <usdt0> <feedId> <bandBps> <guardian>
  */
 import { ContractFactory, computeAddress } from "ethers";
 import {
@@ -50,6 +50,9 @@ async function main() {
   // Deploy EclipseSettlement.
   const setArt = loadArtifact("EclipseSettlement");
   const SettlementFactory = new ContractFactory(setArt.abi, setArt.bytecode, w);
+  // Emergency guardian (can pause matching, never touches custody). Defaults to
+  // the deployer; set GUARDIAN_ADDRESS to a multisig in production.
+  const guardian = optional("GUARDIAN_ADDRESS", w.address);
   const settlement = await SettlementFactory.deploy(
     FLARE_CONTRACT_REGISTRY,
     registryAddr,
@@ -57,6 +60,7 @@ async function main() {
     usdt0,
     XRP_USD_FEED_ID,
     bandBps,
+    guardian,
   );
   await settlement.waitForDeployment();
   const settlementAddr = await settlement.getAddress();

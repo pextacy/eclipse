@@ -2,6 +2,7 @@
 pragma solidity 0.8.25;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IEclipseRegistry} from "./interfaces/IEclipseRegistry.sol";
 
 /// @title EclipseRegistry
@@ -14,7 +15,11 @@ import {IEclipseRegistry} from "./interfaces/IEclipseRegistry.sol";
 /// production `owner` is a governance/multisig. Traders never depend on the
 /// owner for custody: idle escrow in EclipseSettlement is always withdrawable
 /// regardless of the signer set (CLAUDE.md §2.4).
-contract EclipseRegistry is IEclipseRegistry, Ownable {
+///
+/// Ownership is `Ownable2Step`: transferring governance is a two-step handshake
+/// (`transferOwnership` proposes, the new owner must `acceptOwnership`), so a
+/// typo can't hand the signer whitelist to an unreachable address.
+contract EclipseRegistry is IEclipseRegistry, Ownable2Step {
     /// @dev code-hash => signer bound to it (zero if the hash is not registered).
     mapping(bytes32 => address) public signerOf;
     /// @dev signer => code-hash it is bound to (zero if not authorized).

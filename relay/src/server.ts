@@ -7,6 +7,7 @@
  *
  *   GET  /health
  *   GET  /engine/pubkey        → engine sealed-box public key + signer address
+ *   GET  /batch/status         → batch cadence (auto-close countdown; no pool size)
  *   POST /orders               → accept one SealedOrder envelope
  *   POST /batch/close          → close the batch, relay settlement on-chain
  */
@@ -17,6 +18,7 @@ import { Relay } from "./relay.js";
 import { EngineClient } from "./engineClient.js";
 import { OnChainRelay } from "./onchain.js";
 import { Logger } from "./logger.js";
+import { BatchScheduler } from "./scheduler.js";
 
 /** Constant-time string compare (hash to normalize length first). */
 function secretEqual(a: string, b: string): boolean {
@@ -34,6 +36,8 @@ class BadRequest extends Error {}
 export interface RelayServerOptions {
   /** Shared secret required to close a batch. If unset, close is loopback-only. */
   operatorToken?: string;
+  /** Public batch-cadence status for GET /batch/status (no private pool size). */
+  status?: () => unknown;
 }
 
 export function createRelayServer(relay: Relay, engine: EngineClient, opts: RelayServerOptions = {}) {
@@ -87,6 +91,9 @@ export function createRelayServer(relay: Relay, engine: EngineClient, opts: Rela
     try {
       if (req.method === "GET" && req.url === "/health") return send(200, { ok: true });
       if (req.method === "GET" && req.url === "/engine/pubkey") return send(200, await engine.pubkey());
+      if (req.method === "GET" && req.url === "/batch/status") {
+        return send(200, opts.status ? opts.status() : { autoClose: false });
+      }
       if (req.method === "POST" && req.url === "/orders") {
         const accepted = relay.submit(await readJson(req));
         // Do not echo pool size — it is a pre-settlement metadata side channel.
@@ -125,15 +132,27 @@ async function main() {
     );
   }
 
-  const relay = new Relay({ engine, onchain, logger: new Logger() });
+  const logger = new Logger();
+  const relay = new Relay({ engine, onchain, logger });
   const port = Number(process.env.RELAY_PORT ?? "8787");
   const operatorToken = process.env.RELAY_OPERATOR_TOKEN?.trim() || undefined;
+
+  // Optional automatic batch scheduler: close a batch every interval when orders
+  // are pending, matching the discrete-auction design (default 30s cadence).
+  let scheduler: BatchScheduler | undefined;
+  if (process.env.RELAY_AUTO_CLOSE === "true") {
+    const intervalSec = Number(process.env.BATCH_INTERVAL_SECONDS ?? "30");
+    scheduler = new BatchScheduler(relay, intervalSec * 1000, logger);
+    scheduler.start();
+    console.log(`  auto-close: every ${intervalSec}s (batches clear automatically)`);
+  }
   // Without an operator token, bind to localhost ONLY so /batch/close cannot be
   // reached from off-box (a reverse proxy would make every request look like
   // loopback and let anyone force-close a batch). With a token, bind to all
   // interfaces so a remote operator can authenticate.
   const host = operatorToken ? "0.0.0.0" : "127.0.0.1";
-  createRelayServer(relay, engine, { operatorToken }).listen(port, host, () => {
+  const status = scheduler ? () => scheduler!.status() : undefined;
+  createRelayServer(relay, engine, { operatorToken, status }).listen(port, host, () => {
     console.log(`Eclipse relay listening on ${host}:${port} → engine ${engineUrl}`);
     if (!onchain) console.log("  (dry run: no RELAY_PRIVATE_KEY/settlement address — will not relay on-chain)");
     console.log(

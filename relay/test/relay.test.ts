@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Relay } from "../src/relay.js";
 import { OrderPool, PoolFull } from "../src/pool.js";
+import { BatchScheduler } from "../src/scheduler.js";
 import { Logger } from "../src/logger.js";
 import type { IEngineClient, BatchResponse } from "../src/engineClient.js";
 import type { SealedOrder, SignedSettlement } from "@eclipse/shared";
@@ -102,5 +103,34 @@ describe("Relay (untrusted)", () => {
     expect(pool.size()).to.equal(2);
     expect(() => pool.accept(envelope())).toThrow(PoolFull);
     expect(pool.size()).to.equal(2);
+  });
+
+  it("auto-closes a batch only when orders are pending (scheduler)", async () => {
+    const relay = new Relay({
+      engine: new StubEngine({ crossed: true, batchId: "1", signed: cannedSettlement() }),
+      logger: new Logger(false),
+    });
+    const sched = new BatchScheduler(relay, 30_000, new Logger(false), () => 1_000);
+
+    // Empty pool → nothing to clear.
+    expect(await sched.tick()).to.equal(false);
+
+    // Pending order → the scheduler closes and drains the batch.
+    relay.submit(envelope());
+    expect(await sched.tick()).to.equal(true);
+    expect(relay.pool.size()).to.equal(0);
+  });
+
+  it("reports batch cadence without leaking the pool size", async () => {
+    const relay = new Relay({
+      engine: new StubEngine({ crossed: false, batchId: "0", signed: null }),
+      logger: new Logger(false),
+    });
+    const sched = new BatchScheduler(relay, 30_000, new Logger(false), () => 1_000);
+    await sched.tick(); // sets nextCloseAt = 31_000
+    const s = sched.status();
+    expect(s).to.deep.equal({ autoClose: true, intervalSeconds: 30, nextCloseInSeconds: 30 });
+    expect(s).to.not.have.property("pending");
+    expect(s).to.not.have.property("poolSize");
   });
 });

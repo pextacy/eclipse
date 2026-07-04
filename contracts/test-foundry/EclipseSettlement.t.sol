@@ -89,8 +89,9 @@ contract EclipseSettlementForkTest is Test {
         // Eclipse contracts, wired to the real registry.
         registry = new EclipseRegistry(address(this));
         registry.registerCodeHash(CODE_HASH, engine);
+        // This test contract is the guardian, so it can pause/unpause directly.
         settlement = new EclipseSettlement(
-            FLARE_REGISTRY, address(registry), fxrp, usd, XRP_USD_FEED, BAND_BPS
+            FLARE_REGISTRY, address(registry), fxrp, usd, XRP_USD_FEED, BAND_BPS, address(this)
         );
 
         // Provision the desks on the REAL tokens.
@@ -424,12 +425,76 @@ contract EclipseSettlementForkTest is Test {
 
     function test_deploy_rejects_identical_tokens() public {
         vm.expectRevert(EclipseSettlement.TokensNotDistinct.selector);
-        new EclipseSettlement(FLARE_REGISTRY, address(registry), fxrp, fxrp, XRP_USD_FEED, BAND_BPS);
+        new EclipseSettlement(FLARE_REGISTRY, address(registry), fxrp, fxrp, XRP_USD_FEED, BAND_BPS, address(this));
     }
 
     function test_deploy_rejects_zero_addresses() public {
         vm.expectRevert(EclipseSettlement.ZeroAddress.selector);
-        new EclipseSettlement(FLARE_REGISTRY, address(registry), address(0), usd, XRP_USD_FEED, BAND_BPS);
+        new EclipseSettlement(FLARE_REGISTRY, address(registry), address(0), usd, XRP_USD_FEED, BAND_BPS, address(this));
+    }
+
+    function test_deploy_rejects_zero_guardian() public {
+        vm.expectRevert(EclipseSettlement.ZeroAddress.selector);
+        new EclipseSettlement(FLARE_REGISTRY, address(registry), fxrp, usd, XRP_USD_FEED, BAND_BPS, address(0));
+    }
+
+    // ─────────────────────────────────────────── guardian / trading pause
+
+    function test_guardian_can_pause_and_unpause_matching() public {
+        settlement.setTradingPaused(true);
+        assertTrue(settlement.tradingPaused());
+
+        // Commit + settle revert while paused.
+        EclipseSettlement.BatchCommit memory c = EclipseSettlement.BatchCommit({
+            batchId: 1, accounts: _accounts2(), expiry: block.timestamp + 1 hours, nonce: 1
+        });
+        bytes memory csig = _signCommit(ENGINE_PK, c);
+        vm.expectRevert(EclipseSettlement.TradingHalted.selector);
+        settlement.commitBatch(c, csig);
+
+        // Unpause → the same batch commits fine.
+        settlement.setTradingPaused(false);
+        settlement.commitBatch(c, csig);
+        assertTrue(settlement.hasOpenLeg(deskA));
+    }
+
+    function test_custody_stays_open_while_paused() public {
+        vm.prank(deskB);
+        settlement.deposit(fxrp, 100 * FXRP_UNIT);
+        settlement.setTradingPaused(true);
+
+        // Deposit AND withdraw both still work while trading is halted.
+        vm.prank(deskC);
+        settlement.deposit(fxrp, 50 * FXRP_UNIT);
+        vm.prank(deskB);
+        settlement.withdraw(fxrp, 100 * FXRP_UNIT);
+        assertEq(settlement.balanceOf(deskB, fxrp), 0);
+    }
+
+    function test_only_guardian_can_pause_and_transfer() public {
+        vm.prank(deskA);
+        vm.expectRevert(EclipseSettlement.NotGuardian.selector);
+        settlement.setTradingPaused(true);
+
+        // Transfer guardianship to deskA, who can then pause.
+        settlement.transferGuardian(deskA);
+        assertEq(settlement.guardian(), deskA);
+        vm.prank(deskA);
+        settlement.setTradingPaused(true);
+        assertTrue(settlement.tradingPaused());
+    }
+
+    // ─────────────────────────────────────────── registry Ownable2Step
+
+    function test_registry_ownership_is_two_step() public {
+        // Proposing does NOT transfer ownership until accepted.
+        registry.transferOwnership(deskA);
+        assertEq(registry.owner(), address(this));
+        assertEq(registry.pendingOwner(), deskA);
+
+        vm.prank(deskA);
+        registry.acceptOwnership();
+        assertEq(registry.owner(), deskA);
     }
 
     function test_commit_and_settle_reject_batchid_zero() public {

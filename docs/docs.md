@@ -135,6 +135,8 @@ event CodeHashRevoked(bytes32 indexed codeHash);
 
 - Accepts encrypted orders over HTTPS, zod-validates envelope shape (not contents — it can't read them), forwards to the engine, and relays the signed `Settlement` on-chain.
 - Holds no custody and no signing authority over funds. If the relay is fully compromised, the worst it can do is withhold service; it cannot move user funds or read orders.
+- **Automatic batch cadence:** with `RELAY_AUTO_CLOSE=true`, an internal scheduler closes a batch every `BATCH_INTERVAL_SECONDS` while orders are pending (the discrete-auction cadence). `GET /batch/status` reports the countdown without leaking the pending-order count.
+- Endpoints: `GET /health`, `GET /engine/pubkey`, `GET /batch/status`, `POST /orders`, `POST /batch/close` (operator-token / loopback gated).
 
 ## 7. Configuration
 
@@ -224,6 +226,8 @@ plaintext in logs).
 - **Orders are authenticated:** each order carries an EIP-712 signature by its account, verified in-enclave, so no one can move another trader's escrow by submitting an order in their name.
 - **Oracle risk:** clearing price is bounded by FTSO read in the same settlement tx, limiting the damage from any single manipulated batch.
 - **Redeemability:** a trader's idle escrow is always withdrawable, independent of governance and the signer set.
+- **Emergency pause (custody-safe):** a `guardian` can halt NEW matching (`commitBatch`/`settleBatch` revert) during an oracle/engine incident, but deposits, withdrawals and expired-leg self-release stay open — funds are never frozen. The web shows a banner when paused.
+- **Two-step governance:** `EclipseRegistry` uses `Ownable2Step`, so handing over the signer whitelist requires the new owner to `acceptOwnership` — a typo can't strand governance.
 - **Known liveness limits (not fund-loss):** the engine's cross-batch order-replay set lives in enclave memory (sealed with enclave state in a real FCC deployment); an unbacked order from a funded attacker can revert a batch it's in (griefing, bounded by the attacker revealing their own signed account); and strictly-increasing batch nonces require the engine to submit batches in order.
 
 ## 11. Roadmap (post-hackathon)

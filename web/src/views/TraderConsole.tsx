@@ -121,10 +121,37 @@ function EscrowSummary({ account }: { account?: `0x${string}` }) {
     args: account ? [account] : undefined,
     query: { enabled: isConfigured && !!account, refetchInterval: 8000 },
   });
+  const legExpiry = useReadContract({
+    address: deployment.eclipseSettlement,
+    abi: eclipseSettlementAbi,
+    functionName: "openLegExpiry",
+    args: account ? [account] : undefined,
+    query: { enabled: isConfigured && !!account, refetchInterval: 8000 },
+  });
+  const { writeContractAsync } = useWriteContract();
+  const [releaseState, setReleaseState] = useState<string>("");
 
   const fxrpVal = fxrpBal.data ?? 0n;
   const usdt0Val = usdt0Bal.data ?? 0n;
   const locked = openLeg.data === true;
+  const expiryTs = typeof legExpiry.data === "bigint" ? Number(legExpiry.data) : 0;
+  const nowTs = Math.floor(Date.now() / 1000);
+  const legExpired = locked && expiryTs > 0 && nowTs > expiryTs;
+
+  async function releaseLeg() {
+    setReleaseState("Releasing…");
+    try {
+      const hash = await writeContractAsync({
+        address: deployment.eclipseSettlement,
+        abi: eclipseSettlementAbi,
+        functionName: "releaseExpiredLeg",
+      });
+      setReleaseState(`Released — ${hash.slice(0, 10)}…. Your escrow is withdrawable.`);
+      void openLeg.refetch?.();
+    } catch (e) {
+      setReleaseState((e as Error).message ?? "Release failed.");
+    }
+  }
 
   return (
     <Panel
@@ -156,6 +183,25 @@ function EscrowSummary({ account }: { account?: `0x${string}` }) {
           tone={locked ? "warn" : "default"}
         />
       </div>
+
+      {locked && (
+        <div className="mt-4 flex flex-col gap-2 border-t border-line pt-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-2xs text-muted">
+            {legExpired
+              ? "This leg is past its expiry and was never settled — you can self-release it and withdraw. No admin can hold your funds."
+              : `Leg locked until ${expiryTs > 0 ? new Date(expiryTs * 1000).toLocaleTimeString() : "settlement"}. After expiry you can self-release it.`}
+          </p>
+          <button
+            type="button"
+            className="btn btn-accent shrink-0"
+            disabled={!legExpired}
+            onClick={releaseLeg}
+          >
+            Release expired leg
+          </button>
+        </div>
+      )}
+      {releaseState && <p className="mono mt-2 text-2xs text-subtle">{releaseState}</p>}
     </Panel>
   );
 }

@@ -15,20 +15,23 @@ on-chain proof that still needs a funded Coston2 key to execute.
 ## Test summary
 
 ```
-contracts   16 passing   FOUNDRY COSTON2 FORK — NO MOCKS. Forks Coston2 at a pinned block and
+contracts   24 passing   FOUNDRY COSTON2 FORK — NO MOCKS. Forks Coston2 at a pinned block and
                          runs against the REAL FlareContractRegistry, FtsoV2 (live XRP/USD value),
                          FeeCalculator, FXRP FAsset, and WNat. Balances are real: FXRP transferred
                          from a real holder, WNat minted 1:1 from native. Covers deposit/withdraw,
                          double-withdraw, happy settle, UnattestedSigner, PriceOutsideBand, band-edge,
                          UnbalancedBatch, ReplayedBatch, InsufficientEscrow, NotCommitted, custody
-                         guard, auto-release, registry auth/revoke.
+                         guard, auto-release, registry auth/revoke, batchId!=0, distinct-tokens,
+                         guardian trading-pause (custody stays open), Ownable2Step handover.
                          Run: cd contracts && forge test   (needs Coston2 RPC access)
-tee         19 passing   (auction cross/volume/tie-break/conservation/band, STRADDLING cross at the
-                         FTSO ref, dust-cross rejection, sealed-box round-trip, engine end-to-end
-                         signature recovery + replay guard, reproducible code-hash w/ pinned manifests,
-                         attestation registration requiring hardware-quote verification)
-relay        4 passing   (malformed envelope rejected, no plaintext in logs, no-cross, empty batch)
-web         builds clean (next build — App Router, static prerender + strict typecheck; flat/no-gradient verified)
+tee         24 passing   (auction cross/volume/tie-break/conservation/band, STRADDLING cross at the
+                         FTSO ref, dust rejection, decimals-aware quote, sealed-box round-trip, engine
+                         end-to-end sig recovery + order-auth + consume-on-fill + casing normalize,
+                         reproducible code-hash w/ pinned manifests, attestation w/ hardware-quote check)
+relay        7 passing   (malformed envelope rejected, no plaintext in logs, no-cross, empty batch,
+                         pool cap, auto-close scheduler, batch-status without pool-size leak)
+web         builds clean (next build — App Router, static prerender + strict typecheck; flat/no-gradient
+                         verified; network guard, release-expired-leg, trading-paused banner)
 ```
 
 There are **no mock contracts anywhere in the repo** — the settlement suite exercises

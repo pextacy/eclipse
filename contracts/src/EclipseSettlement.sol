@@ -61,6 +61,13 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     uint256 public lastCommitNonce;
     uint256 public lastSettlementNonce;
 
+    /// @notice Emergency guardian: can halt NEW batch matching (commit/settle)
+    /// without ever touching custody. Deposits, withdrawals and expired-leg
+    /// self-release stay open even while paused, so funds are never frozen.
+    address public guardian;
+    /// @notice When true, `commitBatch`/`settleBatch` revert; custody stays open.
+    bool public tradingPaused;
+
     // ─────────────────────────────────────────── EIP-712 typehashes
 
     bytes32 private constant SETTLEMENT_TYPEHASH = keccak256(
@@ -111,6 +118,8 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     error ZeroAddress();
     error TokensNotDistinct();
     error InvalidBatchId();
+    error NotGuardian();
+    error TradingHalted();
 
     // ─────────────────────────────────────────── events
 
@@ -121,6 +130,8 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         uint256 indexed batchId, uint256 clearingPrice, uint256 ftsoRef, uint256 ftsoOnChain, address signer
     );
     event LegReleased(address indexed account, uint256 indexed batchId);
+    event TradingPauseSet(bool paused, address indexed by);
+    event GuardianTransferred(address indexed previousGuardian, address indexed newGuardian);
 
     // ─────────────────────────────────────────── constructor
 
@@ -130,11 +141,12 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         address _fxrp,
         address _usdt0,
         bytes21 _feedId,
-        uint256 _bandBps
+        uint256 _bandBps,
+        address _guardian
     ) EIP712("Eclipse", "1") {
         if (
             _flareRegistry == address(0) || _eclipseRegistry == address(0) || _fxrp == address(0)
-                || _usdt0 == address(0)
+                || _usdt0 == address(0) || _guardian == address(0)
         ) revert ZeroAddress();
         // The two escrow tokens must be distinct — a shared address would collide
         // their escrow ledgers and let one leg's delta spend the other's balance.
@@ -145,6 +157,30 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         usdt0 = _usdt0;
         xrpUsdFeedId = _feedId;
         bandBps = _bandBps;
+        guardian = _guardian;
+        emit GuardianTransferred(address(0), _guardian);
+    }
+
+    // ─────────────────────────────────────────── guardian / pause
+
+    modifier onlyGuardian() {
+        if (msg.sender != guardian) revert NotGuardian();
+        _;
+    }
+
+    /// @notice Halt or resume NEW batch matching. Never affects custody: even
+    /// while paused, traders can deposit, withdraw idle escrow, and self-release
+    /// an expired leg. Emergency brake for an oracle/engine incident.
+    function setTradingPaused(bool paused) external onlyGuardian {
+        tradingPaused = paused;
+        emit TradingPauseSet(paused, msg.sender);
+    }
+
+    /// @notice Hand the emergency guardian role to a new address (e.g. a multisig).
+    function transferGuardian(address newGuardian) external onlyGuardian {
+        if (newGuardian == address(0)) revert ZeroAddress();
+        emit GuardianTransferred(guardian, newGuardian);
+        guardian = newGuardian;
     }
 
     // ─────────────────────────────────────────── deposit / withdraw
@@ -187,6 +223,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
     /// pulled mid-batch. Signed by the attested engine. Only the participant set
     /// is revealed — never sides, amounts, prices, or fills.
     function commitBatch(BatchCommit calldata c, bytes calldata signature) external {
+        if (tradingPaused) revert TradingHalted();
         // batchId 0 is the "no open leg" sentinel — a batch may never use it, or
         // the commit lock would silently no-op and settlement could apply deltas
         // to accounts that were never committed.
@@ -218,6 +255,7 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         payable
         nonReentrant
     {
+        if (tradingPaused) revert TradingHalted();
         if (s.batchId == 0) revert InvalidBatchId();
         if (block.timestamp > s.expiry) revert BatchExpired();
         if (s.nonce <= lastSettlementNonce) revert ReplayedBatch();
