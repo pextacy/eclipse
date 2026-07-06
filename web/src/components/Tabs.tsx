@@ -17,8 +17,9 @@ interface TabsProps {
 export function Tabs({ tabs, active, onChange, right }: TabsProps) {
   return (
     <nav className="flex items-stretch justify-between border-b border-line bg-surface">
-      <div className="flex items-stretch">
-        {tabs.map((t) => {
+      {/* Scrolls horizontally on narrow screens instead of overflowing/wrapping. */}
+      <div className="flex items-stretch overflow-x-auto">
+        {tabs.map((t, i) => {
           const on = t.id === active;
           return (
             <button
@@ -26,20 +27,22 @@ export function Tabs({ tabs, active, onChange, right }: TabsProps) {
               type="button"
               onClick={() => onChange(t.id)}
               className={[
-                "relative px-4 py-3 text-sm transition-colors",
+                "relative shrink-0 whitespace-nowrap px-4 py-3 text-sm transition-colors",
                 on ? "text-eclipse" : "text-muted hover:text-ink",
               ].join(" ")}
+              title={`${t.label}${t.hint ? ` — ${t.hint}` : ""} (press ${i + 1})`}
             >
+              <span className="mr-1.5 hidden text-2xs text-subtle sm:inline">{i + 1}</span>
               <span className="font-semibold">{t.label}</span>
               {t.hint && (
-                <span className="ml-2 hidden text-2xs text-muted md:inline">{t.hint}</span>
+                <span className="ml-2 hidden text-2xs text-muted lg:inline">{t.hint}</span>
               )}
               {on && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-eclipse" />}
             </button>
           );
         })}
       </div>
-      {right && <div className="flex items-center pr-3">{right}</div>}
+      {right && <div className="flex shrink-0 items-center pr-3">{right}</div>}
     </nav>
   );
 }
