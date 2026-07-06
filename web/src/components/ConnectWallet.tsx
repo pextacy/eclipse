@@ -1,14 +1,26 @@
-import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId } from "wagmi";
+import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId, useBalance } from "wagmi";
 import { coston2 } from "../wagmi";
 import { AddressLink } from "./AddressLink";
+import { fmtNum } from "../lib/format";
 
-/** Injected-wallet connect control + Coston2 network guard. */
+/** Below this native balance, on-chain actions may fail for lack of gas. */
+const LOW_GAS = 0.05;
+
+function lowGas(value: bigint, decimals: number): boolean {
+  return Number(value) / 10 ** decimals < LOW_GAS;
+}
+
+/** Injected-wallet connect control + Coston2 network guard + gas balance. */
 export function ConnectWallet() {
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
   const chainId = useChainId();
+  const gas = useBalance({
+    address,
+    query: { enabled: !!address, refetchInterval: 12000 },
+  });
 
   const injected = connectors.find((c) => c.id === "injected") ?? connectors[0];
   const wrongChain = isConnected && chainId !== coston2.id;
@@ -41,6 +53,14 @@ export function ConnectWallet() {
         <span className="mr-1 inline-block h-1.5 w-1.5 bg-good" />
         {wrongChain ? "wrong net" : "Coston2"}
       </span>
+      {gas.data && (
+        <span
+          className={`tag ${lowGas(gas.data.value, gas.data.decimals) ? "border-warn text-warn" : "border-line-strong text-subtle"}`}
+          title={lowGas(gas.data.value, gas.data.decimals) ? "Low gas — top up C2FLR from the Coston2 faucet or transactions may fail" : "Native gas balance"}
+        >
+          {fmtNum(Number(gas.data.value) / 10 ** gas.data.decimals, 3)} {gas.data.symbol}
+        </span>
+      )}
       {address && <AddressLink address={address} showCopy />}
       <button type="button" className="btn" onClick={() => disconnect()}>
         Disconnect
