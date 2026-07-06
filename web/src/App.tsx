@@ -13,6 +13,7 @@ import { PortfolioView } from "./views/PortfolioView";
 import { OverviewView } from "./views/OverviewView";
 import { MarketBar } from "./components/MarketBar";
 import { SettingsButton } from "./components/SettingsButton";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { eclipseSettlementAbi } from "./lib/abis";
 import { deployment, isConfigured } from "./lib/deployment";
 
@@ -89,6 +90,7 @@ export function App() {
             )}
           </span>
           <ConnectWallet />
+          <HelpOverlay />
           <SettingsButton />
         </div>
       </header>

@@ -53,14 +53,22 @@ export function ConnectWallet() {
         <span className="mr-1 inline-block h-1.5 w-1.5 bg-good" />
         {wrongChain ? "wrong net" : "Coston2"}
       </span>
-      {gas.data && (
-        <span
-          className={`tag ${lowGas(gas.data.value, gas.data.decimals) ? "border-warn text-warn" : "border-line-strong text-subtle"}`}
-          title={lowGas(gas.data.value, gas.data.decimals) ? "Low gas — top up C2FLR from the Coston2 faucet or transactions may fail" : "Native gas balance"}
-        >
-          {fmtNum(Number(gas.data.value) / 10 ** gas.data.decimals, 3)} {gas.data.symbol}
-        </span>
-      )}
+      {gas.data &&
+        (lowGas(gas.data.value, gas.data.decimals) ? (
+          <a
+            href="https://faucet.flare.network/coston2"
+            target="_blank"
+            rel="noreferrer"
+            className="tag border-warn text-warn hover:bg-loss-dim"
+            title="Low gas — click to open the Coston2 faucet, or transactions may fail"
+          >
+            {fmtNum(Number(gas.data.value) / 10 ** gas.data.decimals, 3)} {gas.data.symbol} · faucet ↗
+          </a>
+        ) : (
+          <span className="tag border-line-strong text-subtle" title="Native gas balance">
+            {fmtNum(Number(gas.data.value) / 10 ** gas.data.decimals, 3)} {gas.data.symbol}
+          </span>
+        ))}
       {address && <AddressLink address={address} showCopy />}
       <button type="button" className="btn" onClick={() => disconnect()}>
         Disconnect
