@@ -19,7 +19,7 @@ import { StatTile } from "../components/StatTile";
 import { MonoNumber } from "../components/MonoNumber";
 import { AddressLink } from "../components/AddressLink";
 import { TxLink } from "../components/TxLink";
-import { eclipseSettlementAbi, erc20Abi } from "../lib/abis";
+import { eclipseSettlementAbi, eclipseRegistryAbi, erc20Abi } from "../lib/abis";
 import { deployment, isConfigured, relayUrl } from "../lib/deployment";
 import { sealOrder, b64encode } from "../lib/seal";
 import { formatUnits, parseUnits, fmtNum, fmtUsd, truncateHex } from "../lib/format";
@@ -31,7 +31,7 @@ import {
 } from "../lib/market";
 import { useTrackedOrders, deriveStatus, type OrderStatus } from "../lib/orders";
 import { useToast } from "../components/Toast";
-import { useSettings } from "../lib/settings";
+import { useSettings, isValidRelayUrl } from "../lib/settings";
 import { toCsv, downloadCsv } from "../lib/csv";
 
 interface EnginePubkey {
@@ -571,6 +571,25 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
     };
   }, []);
 
+  // Confidentiality gate (audit web H1): the order is sealed to a public key the
+  // RELAY hands us. Before trusting it, confirm (a) the connection to the relay is
+  // secure (https or loopback) so the key can't be swapped by a network MITM, and
+  // (b) the engine's settlement signer is a whitelisted, attested build on-chain.
+  // If either fails we must NOT tell the user their order is confidential.
+  const engineAuthorized = useReadContract({
+    address: deployment.eclipseRegistry,
+    abi: eclipseRegistryAbi,
+    functionName: "isAuthorized",
+    args: engine?.signerAddress ? [engine.signerAddress as `0x${string}`] : undefined,
+    query: { enabled: isConfigured && !!engine?.signerAddress },
+  });
+  const relaySecure = isValidRelayUrl(relayUrl()) && relayUrl().trim() !== "";
+  const signerAuthorized = engineAuthorized.data === true;
+  // Confidentiality is only assured when both hold (and we could actually check
+  // authorization — i.e. a deployment is configured).
+  const confidentialityAssured = relaySecure && (!isConfigured || signerAuthorized);
+  const confidentialityUnverified = !!engine && !confidentialityAssured;
+
   const previewOrder: Order | null = useMemo(() => {
     const acct = account ?? "0x0000000000000000000000000000000000000000";
     let base: string;
@@ -719,6 +738,15 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
       }
     >
       <div className="space-y-3">
+        {confidentialityUnverified && (
+          <div className="border border-warn bg-loss-dim px-3 py-2 text-2xs text-warn">
+            ⚠ Confidentiality unverified.{" "}
+            {!relaySecure
+              ? "The relay connection isn't secure (use https or localhost) — the encryption key could be swapped in transit."
+              : "This relay's engine signer is not a whitelisted attested build on-chain, so orders could be sealed to a key the operator controls."}{" "}
+            Do not submit real size until this clears.
+          </div>
+        )}
         <div className="flex gap-2">
           {[
             { s: Side.Buy, label: "BUY" },
@@ -935,8 +963,15 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
               {ciphertext}
             </div>
             <p className="mt-1 text-2xs text-muted">
-              This is everything the relay ever sees. Side, size and price are unreadable without the
-              engine secret key inside the TEE.
+              This is everything the relay ever sees.{" "}
+              {confidentialityUnverified ? (
+                <span className="text-warn">
+                  But confidentiality is unverified (see the warning above): only a secure connection
+                  to an attested, whitelisted engine guarantees side/size/price stay unreadable.
+                </span>
+              ) : (
+                "Side, size and price are unreadable without the engine secret key inside the TEE."
+              )}
             </p>
           </div>
         )}

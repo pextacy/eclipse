@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSettings, DEFAULT_SETTINGS } from "../lib/settings";
+import { useSettings, DEFAULT_SETTINGS, isValidRelayUrl } from "../lib/settings";
 import { useBandBps } from "../lib/market";
 
 /**
@@ -17,6 +17,7 @@ export function SettingsButton() {
   // Local draft so typing doesn't thrash localStorage / the relay poll.
   const [relay, setRelay] = useState(settings.relayUrl);
   const [slip, setSlip] = useState(String(settings.slippageBps));
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -34,11 +35,16 @@ export function SettingsButton() {
   }, [open]);
 
   function save() {
+    if (!isValidRelayUrl(relay)) {
+      setErr("Relay URL must be https:// (or http://localhost) with no embedded credentials.");
+      return;
+    }
     const parsed = Number(slip);
     update({
       relayUrl: relay.trim(),
       slippageBps: Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : DEFAULT_SETTINGS.slippageBps,
     });
+    setErr("");
     setOpen(false);
   }
 
@@ -116,6 +122,8 @@ export function SettingsButton() {
                 </p>
               </div>
             </div>
+
+            {err && <p className="mono px-4 pb-1 text-2xs text-loss">{err}</p>}
 
             <footer className="flex items-center justify-between border-t border-line px-4 py-3">
               <button

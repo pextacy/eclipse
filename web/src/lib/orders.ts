@@ -36,13 +36,35 @@ export interface TrackedOrder {
 const KEY = "eclipse.orders.v1";
 const MAX_PER_ACCOUNT = 50;
 
+/** Validate one persisted record's shape. Corrupt/foreign localStorage entries
+ *  (extension, shared machine, schema drift) must not crash the blotter render,
+ *  which calls o.account.toLowerCase(), Number(o.baseAmount), o.expiry - now,
+ *  etc. (Audit web M2.) */
+function isTrackedOrder(o: unknown): o is TrackedOrder {
+  if (!o || typeof o !== "object") return false;
+  const r = o as Record<string, unknown>;
+  return (
+    typeof r.submissionId === "string" &&
+    typeof r.account === "string" &&
+    (r.side === Side.Buy || r.side === Side.Sell) &&
+    typeof r.baseAmount === "string" &&
+    typeof r.limitPrice === "string" &&
+    typeof r.createdAt === "number" &&
+    typeof r.expiry === "number" &&
+    typeof r.sinceBatchId === "string" &&
+    typeof r.escrowSnapshot === "string" &&
+    (r.filledBatchId === undefined || typeof r.filledBatchId === "string")
+  );
+}
+
 function load(): TrackedOrder[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as TrackedOrder[]) : [];
+    // Drop any element that doesn't match the shape instead of trusting the cast.
+    return Array.isArray(parsed) ? parsed.filter(isTrackedOrder) : [];
   } catch {
     return [];
   }

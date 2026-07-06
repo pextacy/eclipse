@@ -5,8 +5,12 @@
 
 export function toCsv(headers: string[], rows: (string | number)[][]): string {
   const esc = (v: string | number) => {
-    const s = String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    let s = String(v);
+    // Formula-injection guard: a cell beginning with = + - @ (or a leading tab/CR)
+    // is executed as a formula by Excel/Sheets on open. Neutralize by prefixing a
+    // single quote. RFC-4180 quoting alone does NOT prevent this. (Audit web M1.)
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.map(esc).join(",")];
   for (const row of rows) lines.push(row.map(esc).join(","));
