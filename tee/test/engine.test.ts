@@ -48,7 +48,10 @@ async function order(
     limitPrice: limit,
     account,
     nonce: String(++nonce),
-    expiry: 9_999_999_999,
+    // Within the engine's accepted expiry horizon (now=1000, batchTtl=300 →
+    // cap now+300*4=2200). The far-future sentinel is now rejected by design
+    // (bounds the replay window — see engine.ts / SECURITY.md).
+    expiry: 2_000,
   };
   const signature = await wallet.signTypedData(
     orderEip712Domain(CHAIN_ID, SETTLEMENT),

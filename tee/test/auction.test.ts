@@ -128,6 +128,27 @@ describe("runAuction", () => {
     expect(r.deltas).to.have.length(0);
   });
 
+  it("excludes a self-crossing (wash) account from price discovery", () => {
+    // An account on BOTH sides could otherwise inflate crossed volume at a band
+    // edge to drag the uniform price. Such an account is dropped entirely, so the
+    // honest B/C cross still clears at the fair reference and the attacker takes
+    // no fill. (Security audit MED-1.)
+    const orders = [
+      order(Side.Buy, "100000000", "50200000", B), // honest buyer
+      order(Side.Sell, "100000000", "49800000", C), // honest seller
+      order(Side.Buy, "500000000", "50250000", A), // attacker buy (near hi)
+      order(Side.Sell, "500000000", "49750000", A), // attacker sell (near lo)
+    ];
+    const r = runAuction(orders, FTSO, BAND);
+    expect(r.crossed).to.equal(true);
+    // Attacker A is fully excluded — no delta.
+    expect(r.deltas.find((d) => d.account === A)).to.equal(undefined);
+    // Honest cross clears at the FTSO reference, unmanipulated.
+    expect(r.clearingPrice).to.equal(50_000_000n);
+    expect(r.matchedVolume).to.equal(100_000_000n);
+    expect(conserves(r.deltas)).to.equal(true);
+  });
+
   it("excludes clearing prices outside the FTSO band (defense in depth)", () => {
     // A fat cross exists at 0.60, but that is outside the ±0.5% band, so the
     // engine refuses to clear there.

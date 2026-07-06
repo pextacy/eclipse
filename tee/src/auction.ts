@@ -103,6 +103,25 @@ export function runAuction(
     (o.side === Side.Buy ? buys : sells).push(n);
   }
 
+  // Reject self-crossing (wash) accounts. An account appearing on BOTH sides can
+  // submit validly-signed buy@hi / sell@lo orders that net to zero for itself but
+  // inflate crossed volume at a band edge, dragging the uniform clearing price to
+  // that edge to skim up to bandBps from honest counterparties. Drop every order
+  // from any such account before price discovery so it can't influence the price.
+  // (Security audit MED-1.) Accounts are compared case-insensitively.
+  const key = (a: string) => a.toLowerCase();
+  const buyAccts = new Set(buys.map((b) => key(b.account)));
+  const wash = new Set(sells.map((s) => key(s.account)).filter((a) => buyAccts.has(a)));
+  if (wash.size > 0) {
+    const keep = (arr: Norm[]) => arr.filter((o) => !wash.has(key(o.account)));
+    const keptBuys = keep(buys);
+    const keptSells = keep(sells);
+    buys.length = 0;
+    buys.push(...keptBuys);
+    sells.length = 0;
+    sells.push(...keptSells);
+  }
+
   if (buys.length === 0 || sells.length === 0) return empty;
 
   // Band edges (edge-inclusive, matching the on-chain check), and a clamp of any

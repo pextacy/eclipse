@@ -119,10 +119,18 @@ export class MatchingEngine {
     const orders: Order[] = [];
     const seenThisBatch = new Set<string>();
     const expiryByKey = new Map<string, number>();
+    // Hard ceiling on how far in the future an order may be valid. The in-memory
+    // replay guard (`consumed`) does not survive a restart, so a filled order's
+    // ciphertext (held by the untrusted relay) could in principle be re-executed
+    // after a restart within its own validity window. Bounding the accepted
+    // expiry horizon caps that window regardless of what a client signs. A full
+    // fix (durable/on-chain per-order nonces) is tracked in SECURITY.md.
+    const maxOrderTtl = this.cfg.batchTtlSeconds * 4;
     for (const s of sealedOrders) {
       try {
         const o = await this.open(s);
         if (o.expiry <= now) continue; // expired
+        if (o.expiry > now + maxOrderTtl) continue; // absurd far-future expiry
         // Normalize the address so mixed-case duplicates can't split a trader's
         // netting (which would revert the whole batch on-chain), and so it keys
         // the guards consistently.

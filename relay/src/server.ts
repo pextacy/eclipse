@@ -120,7 +120,8 @@ export function createRelayServer(relay: Relay, engine: EngineClient, opts: Rela
 
 async function main() {
   const engineUrl = process.env.ENGINE_URL ?? "http://localhost:8899";
-  const engine = new EngineClient(engineUrl);
+  // If the engine requires a token for /batch (non-loopback deployments), forward it.
+  const engine = new EngineClient(engineUrl, process.env.ENGINE_OPERATOR_TOKEN?.trim() || undefined);
 
   let onchain: OnChainRelay | undefined;
   const { RELAY_PRIVATE_KEY, COSTON2_RPC, ECLIPSE_SETTLEMENT_ADDRESS } = process.env;

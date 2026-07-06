@@ -10,7 +10,8 @@
  *   GET  /pubkey  → { publicKey, signerAddress }   (traders seal orders to this)
  *   POST /batch   → { orders: SealedOrder[] } → BatchOutcome (signed net settlement)
  */
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import "dotenv/config";
 import { z } from "zod";
 import { Contract, JsonRpcProvider } from "ethers";
@@ -76,6 +77,22 @@ async function seedSequenceFromChain(engine: MatchingEngine, rpc: string, settle
 
 const BatchRequest = z.object({ orders: z.array(SealedOrderSchema).min(1).max(1024) });
 
+/** Cap the /batch request body so an unauthenticated POST can't exhaust memory. */
+const MAX_ENGINE_BODY_BYTES = 4 * 1024 * 1024; // 1024 sealed orders, comfortably
+
+/** Constant-time secret compare (hash first to normalize length). */
+function secretEqual(a: string, b: string): boolean {
+  return timingSafeEqual(
+    createHash("sha256").update(a).digest(),
+    createHash("sha256").update(b).digest(),
+  );
+}
+
+function isLoopback(req: IncomingMessage): boolean {
+  const a = req.socket.remoteAddress ?? "";
+  return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+}
+
 function env(name: string, fallback?: string): string {
   const v = process.env[name];
   if (v && v.trim() !== "") return v.trim();
@@ -130,6 +147,19 @@ async function main() {
   );
   const port = Number(env("ENGINE_PORT", "8899"));
 
+  // Only the trusted relay may drive a batch: an unauthenticated caller who can
+  // reach /batch can burn observed orders (consumed-on-fill) without settling
+  // them (griefing), or push crafted batches. Require a shared token if set;
+  // otherwise restrict /batch to loopback (and bind to 127.0.0.1 below).
+  const operatorToken = process.env.ENGINE_OPERATOR_TOKEN?.trim() || undefined;
+  const authorizedForBatch = (req: IncomingMessage): boolean => {
+    if (operatorToken) {
+      const provided = req.headers["x-operator-token"];
+      return typeof provided === "string" && secretEqual(provided, operatorToken);
+    }
+    return isLoopback(req);
+  };
+
   const server = createServer((req, res) => {
     const send = (code: number, body: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -140,9 +170,23 @@ async function main() {
       return send(200, { publicKey: engine.publicKey, signerAddress: engine.signerAddress });
     }
     if (req.method === "POST" && req.url === "/batch") {
+      if (!authorizedForBatch(req)) return send(401, { error: "unauthorized" });
       let raw = "";
-      req.on("data", (c) => (raw += c));
+      let size = 0;
+      let aborted = false;
+      req.on("data", (c) => {
+        if (aborted) return;
+        size += (c as Buffer).length;
+        if (size > MAX_ENGINE_BODY_BYTES) {
+          aborted = true;
+          send(413, { error: "request body too large" });
+          req.destroy();
+          return;
+        }
+        raw += c;
+      });
       req.on("end", async () => {
+        if (aborted) return;
         try {
           const parsed = BatchRequest.parse(JSON.parse(raw));
           const outcome = await engine.runBatch(parsed.orders);
@@ -158,10 +202,19 @@ async function main() {
     send(404, { error: "not found" });
   });
 
-  server.listen(port, () => {
-    console.log(`Eclipse engine listening on :${port}`);
+  // Without a token the engine binds to loopback ONLY so /batch can't be reached
+  // off-box (a reverse proxy would make every request look like loopback and let
+  // anyone drive batches). With a token, bind to all interfaces for a remote relay.
+  const host = operatorToken ? "0.0.0.0" : "127.0.0.1";
+  server.listen(port, host, () => {
+    console.log(`Eclipse engine listening on ${host}:${port}`);
     console.log(`  signer:  ${engine.signerAddress}`);
     console.log(`  pubkey:  ${engine.publicKey}`);
+    console.log(
+      operatorToken
+        ? "  /batch: requires x-operator-token header"
+        : "  /batch: loopback-only (set ENGINE_OPERATOR_TOKEN for a remote relay)",
+    );
   });
 }
 

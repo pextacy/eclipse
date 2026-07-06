@@ -20,7 +20,11 @@ export interface IEngineClient {
 /** Talks to the (trusted) engine over the loopback / private link. The relay
  * forwards ciphertext and receives only the public signed settlement back. */
 export class EngineClient implements IEngineClient {
-  constructor(private readonly baseUrl: string) {}
+  /** Optional shared token for the engine's /batch auth (loopback needs none). */
+  constructor(
+    private readonly baseUrl: string,
+    private readonly operatorToken?: string,
+  ) {}
 
   async pubkey(): Promise<EnginePubkey> {
     const res = await fetch(`${this.baseUrl}/pubkey`);
@@ -29,9 +33,11 @@ export class EngineClient implements IEngineClient {
   }
 
   async runBatch(orders: SealedOrder[]): Promise<BatchResponse> {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.operatorToken) headers["x-operator-token"] = this.operatorToken;
     const res = await fetch(`${this.baseUrl}/batch`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ orders }),
     });
     if (!res.ok) throw new Error(`engine /batch failed: ${res.status}`);
