@@ -32,7 +32,8 @@ tee         24 passing   (auction cross/volume/tie-break/conservation/band, STRA
 relay        7 passing   (malformed envelope rejected, no plaintext in logs, no-cross, empty batch,
                          pool cap, auto-close scheduler, batch-status without pool-size leak)
 web         builds clean (next build — App Router, static prerender + strict typecheck; flat/no-gradient
-                         verified; 5 tabs — Comparison, Trader Console, Portfolio, Batches analytics
+                         verified; 6 tabs — Comparison, Overview (at-a-glance market + account
+                         dashboard), Trader Console, Portfolio, Batches analytics
                          (clearing-vs-FTSO chart), Verifier; persistent market bar (live XRP/USD +
                          sparkline, band, next-batch countdown); wallet-balance + Max on deposit/withdraw;
                          live oracle price context + eligibility on the order form; local privacy-preserving

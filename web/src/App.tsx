@@ -10,6 +10,7 @@ import { ComparisonView } from "./views/ComparisonView";
 import { VerifierPanel } from "./views/VerifierPanel";
 import { BatchesView } from "./views/BatchesView";
 import { PortfolioView } from "./views/PortfolioView";
+import { OverviewView } from "./views/OverviewView";
 import { MarketBar } from "./components/MarketBar";
 import { eclipseSettlementAbi } from "./lib/abis";
 import { deployment, isConfigured } from "./lib/deployment";
@@ -33,6 +34,7 @@ function TradingPausedBanner() {
 
 const TABS: TabDef[] = [
   { id: "compare", label: "Comparison", hint: "why it matters" },
+  { id: "overview", label: "Overview", hint: "at a glance" },
   { id: "trade", label: "Trader Console", hint: "seal & settle" },
   { id: "portfolio", label: "Portfolio", hint: "position & P&L" },
   { id: "batches", label: "Batches", hint: "fair over time" },
@@ -80,6 +82,7 @@ export function App() {
 
       <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-6">
         {tab === "compare" && <ComparisonView />}
+        {tab === "overview" && <OverviewView onNavigate={setTab} />}
         {tab === "trade" && <TraderConsole />}
         {tab === "portfolio" && <PortfolioView />}
         {tab === "batches" && <BatchesView />}
