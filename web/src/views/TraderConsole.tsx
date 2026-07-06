@@ -425,6 +425,112 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
 
 /* ------------------------------------------------------------------ */
 
+/** Review-and-confirm modal shown before the wallet signature — a fat-finger
+ *  guard summarizing exactly what will be sealed and submitted. */
+function OrderConfirm({
+  side,
+  baseAmount,
+  limitPrice,
+  notionalUsd,
+  devBps,
+  band,
+  midPrice,
+  limitInsideBand,
+  tifSec,
+  onCancel,
+  onConfirm,
+}: {
+  side: Side;
+  baseAmount: number;
+  limitPrice: string;
+  notionalUsd: number;
+  devBps: number;
+  band: number;
+  midPrice: number;
+  limitInsideBand: boolean;
+  tifSec: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+      if (e.key === "Enter") onConfirm();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel, onConfirm]);
+
+  const isBuy = side === Side.Buy;
+  const tifLabel = tifSec >= 3600 ? `${tifSec / 3600}h` : tifSec >= 60 ? `${tifSec / 60}m` : `${tifSec}s`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onCancel}>
+      <div className="w-full max-w-sm border border-line-strong bg-panel" onClick={(e) => e.stopPropagation()}>
+        <header className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-subtle">Review sealed order</h2>
+          <span className={`tag ${isBuy ? "border-eclipse text-eclipse" : "border-loss text-loss"}`}>
+            {isBuy ? "BUY" : "SELL"}
+          </span>
+        </header>
+        <div className="space-y-2 p-4 text-xs">
+          <ConfirmRow label="Size">{fmtNum(baseAmount, 0)} FXRP</ConfirmRow>
+          <ConfirmRow label="Limit price">{limitPrice} XRP/USD</ConfirmRow>
+          <ConfirmRow label="Notional">{fmtUsd(notionalUsd)}</ConfirmRow>
+          <ConfirmRow label={isBuy ? "You pay (max)" : "You sell"}>
+            <span className="text-loss">
+              {isBuy ? `${fmtNum(notionalUsd, 2)} USDT0` : `${fmtNum(baseAmount, 0)} FXRP`}
+            </span>
+          </ConfirmRow>
+          <ConfirmRow label="You receive">
+            <span className="text-good">
+              {isBuy ? `${fmtNum(baseAmount, 0)} FXRP` : `${fmtNum(notionalUsd, 2)} USDT0`}
+            </span>
+          </ConfirmRow>
+          <ConfirmRow label="Time in force">{tifLabel}</ConfirmRow>
+          <div className="border-t border-line pt-2">
+            <ConfirmRow label={`vs FTSO mid (${midPrice > 0 ? fmtNum(midPrice, 5) : "…"})`}>
+              <span className={limitInsideBand ? "text-good" : "text-warn"}>
+                {midPrice > 0 ? `${devBps >= 0 ? "+" : ""}${fmtNum(devBps, 1)} bps` : "—"}
+                {midPrice > 0 && (limitInsideBand ? " · eligible" : ` · outside ±${band}bps`)}
+              </span>
+            </ConfirmRow>
+          </div>
+          {midPrice > 0 && !limitInsideBand && (
+            <p className="mono text-2xs text-warn">
+              This limit is outside the on-chain fairness band — it will rest sealed but can't clear
+              until the mid moves toward it.
+            </p>
+          )}
+          <p className="mono border-t border-line pt-2 text-2xs text-muted">
+            The order is encrypted client-side before it leaves your browser. You'll sign it in your
+            wallet next — the relay only ever sees ciphertext.
+          </p>
+        </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-accent" onClick={onConfirm}>
+            Confirm &amp; sign
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted">{label}</span>
+      <span className="mono text-subtle">{children}</span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   const [side, setSide] = useState<Side>(Side.Buy);
   const [baseAmount, setBaseAmount] = useState("1000");
@@ -437,6 +543,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   const [ciphertext, setCiphertext] = useState<string>("");
   const [submitState, setSubmitState] = useState<string>("");
   const [usingDemoKey, setUsingDemoKey] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const { signTypedDataAsync } = useSignTypedData();
   const toast = useToast();
 
@@ -764,10 +871,39 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
           >
             Seal preview
           </button>
-          <button type="button" className="btn btn-accent flex-1" onClick={submit}>
+          <button
+            type="button"
+            className="btn btn-accent flex-1"
+            onClick={() => {
+              if (!previewOrder) {
+                setSubmitState("Invalid amount/price.");
+                return;
+              }
+              setConfirmOpen(true);
+            }}
+          >
             Seal + submit
           </button>
         </div>
+
+        {confirmOpen && previewOrder && (
+          <OrderConfirm
+            side={side}
+            baseAmount={baseNum}
+            limitPrice={limitPrice}
+            notionalUsd={notionalUsd}
+            devBps={devBps}
+            band={band}
+            midPrice={mid.price}
+            limitInsideBand={limitInsideBand}
+            tifSec={tifSec}
+            onCancel={() => setConfirmOpen(false)}
+            onConfirm={() => {
+              setConfirmOpen(false);
+              void submit();
+            }}
+          />
+        )}
 
         {engine ? (
           <div className="border-t border-line pt-2 text-2xs text-muted">
@@ -941,6 +1077,7 @@ function OrderBlotter({ account }: { account?: `0x${string}` }) {
   const { orders, markFilled, clear } = useTrackedOrders(account);
   const escrowTotal = useAccountEscrowTotal(account);
   const latestBatchId = useLatestSettledBatchId();
+  const toast = useToast();
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
 
   useEffect(() => {
@@ -953,11 +1090,19 @@ function OrderBlotter({ account }: { account?: `0x${string}` }) {
     status: deriveStatus(o, { nowSec, latestBatchId, currentEscrow: escrowTotal }),
   }));
 
-  // Persist an inferred fill so it survives later escrow changes.
+  // Persist a newly-inferred fill (and notify). markFilled only runs while
+  // filledBatchId is unset, so this fires exactly once at the fill transition —
+  // not on reload for already-filled orders.
   useEffect(() => {
     for (const { o, status } of rows) {
       if (status === "filled" && !o.filledBatchId) {
         markFilled(o.submissionId, latestBatchId.toString());
+        toast.push({
+          kind: "success",
+          title: "Order filled",
+          message: `${o.side === Side.Buy ? "BUY" : "SELL"} ${fmtNum(Number(o.baseAmount), 0)} FXRP cleared in a batch`,
+          autoDismissMs: 9000,
+        });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

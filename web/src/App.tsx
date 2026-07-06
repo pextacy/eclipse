@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useReadContract } from "wagmi";
 import { Tabs, type TabDef } from "./components/Tabs";
 import { ConnectWallet } from "./components/ConnectWallet";
@@ -44,6 +44,23 @@ const TABS: TabDef[] = [
 
 export function App() {
   const [tab, setTab] = useState<string>("compare");
+
+  // Number-key tab switching (1–6), like a trading terminal. Ignored while the
+  // user is typing in a field or a modal input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= TABS.length) {
+        setTab(TABS[n - 1]!.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="flex min-h-full flex-col">
@@ -110,6 +127,8 @@ export function App() {
           </span>
           <span>·</span>
           <span>orders sealed client-side (crypto_box_seal) — the relay never sees plaintext</span>
+          <span>·</span>
+          <span>keys 1–{TABS.length} switch tabs</span>
         </div>
       </footer>
     </div>
