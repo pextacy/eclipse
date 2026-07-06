@@ -6,6 +6,12 @@
 src = "src"
 test = "test-foundry"
 out = "out"
+# Foundry and Hardhat both default their compiler cache to `cache/solidity-files-cache.json`
+# but write mutually-incompatible formats. Running `hardhat compile` (for the deploy
+# artifacts) would clobber Foundry's cache, making every subsequent `forge test` log
+# `invalid type: sequence, expected a map` and recompile from scratch. Give Foundry its
+# own cache dir so the two toolchains never collide.
+cache_path = "cache-forge"
 libs = ["node_modules"]
 solc = "0.8.25"
 evm_version = "cancun"

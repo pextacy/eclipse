@@ -512,4 +512,25 @@ contract EclipseSettlementForkTest is Test {
         vm.expectRevert(EclipseSettlement.InvalidBatchId.selector);
         settlement.settleBatch(s, ssig);
     }
+
+    function test_currentXrpUsdPrice_matches_live_feed() public {
+        // The UI reads this to price orders against the SAME reference the band
+        // check uses. It must equal the live FTSO value read straight from the
+        // feed in setUp — no drift, no separate oracle path.
+        (uint256 value, int8 decimals, uint64 timestamp) = settlement.currentXrpUsdPrice();
+        assertEq(value, ftsoValue, "currentXrpUsdPrice must equal the live FTSO value");
+        assertGt(value, 0, "price must be positive");
+        assertEq(decimals, 6, "Coston2 XRP/USD feed publishes 6 decimals (UI scale)");
+        assertGt(timestamp, 0, "feed must carry an update timestamp");
+
+        // And a settlement priced exactly at this reference clears the band.
+        uint256 expiry = _commitAB(1, 1);
+        EclipseSettlement.Settlement memory s = _happySettlement(expiry);
+        s.clearingPrice = value;
+        vm.prank(deskA);
+        settlement.deposit(usd, 50 * USD_UNIT);
+        vm.prank(deskB);
+        settlement.deposit(fxrp, 100 * FXRP_UNIT);
+        settlement.settleBatch(s, _signSettlement(ENGINE_PK, s));
+    }
 }

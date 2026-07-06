@@ -34,7 +34,11 @@ contracts/   Solidity — EclipseSettlement.sol, EclipseRegistry.sol, IEclipseRe
              test-foundry/ — Coston2 fork tests (real chain, no mocks); lib/forge-std
 tee/         Matching engine: sealed orders, batch auction, signer, FCC extension + reproducible build
 relay/       Untrusted backend: order intake, engine transport, on-chain relay
-web/         React trader console + front-running comparison + public verifier panel
+web/         React/Next.js terminal — trader console (sealed orders, wallet-balance + Max,
+             live oracle price context, local order blotter), portfolio (escrow-derived
+             position + mark-to-market P&L), front-running comparison, batch analytics,
+             public verifier panel; persistent market bar (live FTSO + sparkline, band,
+             next-batch countdown) and app-wide tx toasts
 scripts/     Registry resolver, deploy, code-hash registration, demo batch
 shared/      Shared types: Order/Settlement schemas + the single EIP-712 type source
 docs/        CLAUDE.md, prd.md, plan.md, phases.md, docs.md

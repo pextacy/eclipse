@@ -324,6 +324,24 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         return _hasOpenLeg(account);
     }
 
+    /// @notice The live FTSO XRP/USD reference the settlement path bounds every
+    /// clearing price against. Not a `view` because the FTSO getter is `payable`,
+    /// but the fee is currently 0 on Coston2 so it is callable read-only via
+    /// `eth_call` (staticcall) with no value. Exposing it here lets a trader
+    /// price an order against the *exact same* oracle reference the on-chain band
+    /// check uses — no separate, drift-prone oracle path in the UI.
+    /// @return value    XRP/USD value at the feed's native scale
+    /// @return decimals the feed's decimal places
+    /// @return timestamp the feed's last-update time
+    function currentXrpUsdPrice()
+        external
+        returns (uint256 value, int8 decimals, uint64 timestamp)
+    {
+        FtsoV2Interface ftso = FtsoV2Interface(flareRegistry.getContractAddressByName(_FTSO_NAME));
+        uint256 fee = _ftsoFee();
+        (value, decimals, timestamp) = ftso.getFeedById{value: fee}(xrpUsdFeedId);
+    }
+
     /// @notice EIP-712 digest for a settlement (exposed for tooling/tests).
     function settlementDigest(Settlement calldata s) external view returns (bytes32) {
         return _hashTypedDataV4(_structHashSettlement(s));

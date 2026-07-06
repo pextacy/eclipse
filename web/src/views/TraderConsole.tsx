@@ -22,7 +22,15 @@ import { TxLink } from "../components/TxLink";
 import { eclipseSettlementAbi, erc20Abi } from "../lib/abis";
 import { deployment, isConfigured, relayUrl } from "../lib/deployment";
 import { sealOrder, b64encode } from "../lib/seal";
-import { formatUnits, parseUnits, fmtNum, truncateHex } from "../lib/format";
+import { formatUnits, parseUnits, fmtNum, fmtUsd, truncateHex } from "../lib/format";
+import {
+  useLivePrice,
+  useBandBps,
+  useAccountEscrowTotal,
+  useLatestSettledBatchId,
+} from "../lib/market";
+import { useTrackedOrders, deriveStatus, type OrderStatus } from "../lib/orders";
+import { useToast } from "../components/Toast";
 
 interface EnginePubkey {
   publicKey: string;
@@ -65,6 +73,7 @@ export function TraderConsole() {
             <MoveFunds account={address} mode="deposit" />
             <MoveFunds account={address} mode="withdraw" />
           </div>
+          <OrderBlotter account={address} />
           <BatchFills />
         </div>
         <div className="space-y-6">
@@ -129,6 +138,7 @@ function EscrowSummary({ account }: { account?: `0x${string}` }) {
     query: { enabled: isConfigured && !!account, refetchInterval: 8000 },
   });
   const { writeContractAsync } = useWriteContract();
+  const toast = useToast();
   const [releaseState, setReleaseState] = useState<string>("");
 
   const fxrpVal = fxrpBal.data ?? 0n;
@@ -140,6 +150,11 @@ function EscrowSummary({ account }: { account?: `0x${string}` }) {
 
   async function releaseLeg() {
     setReleaseState("Releasing…");
+    const tid = toast.push({
+      kind: "pending",
+      title: "Release expired leg",
+      message: "Awaiting wallet…",
+    });
     try {
       const hash = await writeContractAsync({
         address: deployment.eclipseSettlement,
@@ -147,9 +162,23 @@ function EscrowSummary({ account }: { account?: `0x${string}` }) {
         functionName: "releaseExpiredLeg",
       });
       setReleaseState(`Released — ${hash.slice(0, 10)}…. Your escrow is withdrawable.`);
+      toast.update(tid, {
+        kind: "success",
+        title: "Leg released",
+        message: "Escrow is withdrawable again",
+        txHash: hash,
+        autoDismissMs: 8000,
+      });
       void openLeg.refetch?.();
     } catch (e) {
-      setReleaseState((e as Error).message ?? "Release failed.");
+      const msg = (e as Error).message ?? "Release failed.";
+      setReleaseState(msg);
+      toast.update(tid, {
+        kind: "error",
+        title: "Release failed",
+        message: shortError(msg),
+        autoDismissMs: 9000,
+      });
     }
   }
 
@@ -221,6 +250,26 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
   const meta = useTokenMeta(token, tokenKey === "fxrp" ? "FXRP" : "USDT0", 6);
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
+  const toast = useToast();
+
+  // The relevant balance for this action: for deposit, what's in the trader's
+  // wallet; for withdraw, what's idle in escrow. Drives the "Balance / Max" row
+  // so a trader never has to guess the maximum they can move.
+  const walletBal = useReadContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: account ? [account] : undefined,
+    query: { enabled: isConfigured && !!account && isDeposit, refetchInterval: 8000 },
+  });
+  const escrowBal = useReadContract({
+    address: deployment.eclipseSettlement,
+    abi: eclipseSettlementAbi,
+    functionName: "balanceOf",
+    args: account ? [account, token] : undefined,
+    query: { enabled: isConfigured && !!account && !isDeposit, refetchInterval: 8000 },
+  });
+  const available = (isDeposit ? walletBal.data : escrowBal.data) ?? 0n;
 
   async function submit() {
     setError("");
@@ -243,9 +292,15 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
     }
 
     setBusy(true);
+    const tid = toast.push({
+      kind: "pending",
+      title: `${isDeposit ? "Deposit" : "Withdraw"} ${meta.symbol}`,
+      message: `${amount} ${meta.symbol} — awaiting wallet…`,
+    });
     try {
       if (isDeposit) {
         setStatus(`Approving ${meta.symbol}…`);
+        toast.update(tid, { message: `Approving ${meta.symbol}…` });
         const approveHash = await writeContractAsync({
           address: token,
           abi: erc20Abi,
@@ -255,6 +310,7 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
         if (publicClient) await publicClient.waitForTransactionReceipt({ hash: approveHash });
 
         setStatus(`Depositing ${meta.symbol}…`);
+        toast.update(tid, { message: `Depositing ${amount} ${meta.symbol}…` });
         const depositHash = await writeContractAsync({
           address: deployment.eclipseSettlement,
           abi: eclipseSettlementAbi,
@@ -263,8 +319,16 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
         });
         setTxHash(depositHash);
         setStatus("Deposit submitted.");
+        toast.update(tid, {
+          kind: "success",
+          title: `Deposited ${meta.symbol}`,
+          message: `${amount} ${meta.symbol} escrowed`,
+          txHash: depositHash,
+          autoDismissMs: 8000,
+        });
       } else {
         setStatus(`Withdrawing ${meta.symbol}…`);
+        toast.update(tid, { message: `Withdrawing ${amount} ${meta.symbol}…` });
         const withdrawHash = await writeContractAsync({
           address: deployment.eclipseSettlement,
           abi: eclipseSettlementAbi,
@@ -273,10 +337,24 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
         });
         setTxHash(withdrawHash);
         setStatus("Withdraw submitted.");
+        toast.update(tid, {
+          kind: "success",
+          title: `Withdrew ${meta.symbol}`,
+          message: `${amount} ${meta.symbol} returned to wallet`,
+          txHash: withdrawHash,
+          autoDismissMs: 8000,
+        });
       }
     } catch (e) {
-      setError((e as Error).message ?? "Transaction failed.");
+      const msg = (e as Error).message ?? "Transaction failed.";
+      setError(msg);
       setStatus("");
+      toast.update(tid, {
+        kind: "error",
+        title: `${isDeposit ? "Deposit" : "Withdraw"} failed`,
+        message: shortError(msg),
+        autoDismissMs: 9000,
+      });
     } finally {
       setBusy(false);
     }
@@ -298,7 +376,22 @@ function MoveFunds({ account, mode }: { account?: `0x${string}`; mode: "deposit"
           ))}
         </div>
         <div>
-          <label className="label mb-1">Amount ({meta.symbol})</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="label">Amount ({meta.symbol})</label>
+            <span className="mono text-2xs text-muted">
+              {isDeposit ? "wallet" : "escrow"}:{" "}
+              <button
+                type="button"
+                className="text-info hover:text-eclipse disabled:text-muted"
+                disabled={!account || available === 0n}
+                // Strip thousands separators — parseUnits() rejects grouped input.
+                onClick={() => setAmount(formatUnits(available, meta.decimals).replace(/,/g, ""))}
+                title="Use full balance"
+              >
+                {account ? `${formatUnits(available, meta.decimals)} ${meta.symbol}` : "—"}
+              </button>
+            </span>
+          </div>
           <input
             className="input"
             inputMode="decimal"
@@ -334,12 +427,16 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   const [side, setSide] = useState<Side>(Side.Buy);
   const [baseAmount, setBaseAmount] = useState("1000");
   const [limitPrice, setLimitPrice] = useState("0.50");
+  // Time-in-force: how long the sealed order stays eligible before its leg can be
+  // self-released. Drives the order's `expiry`; the batch cadence is separate.
+  const [tifSec, setTifSec] = useState(300);
   const [engine, setEngine] = useState<EnginePubkey | null>(null);
   const [engineErr, setEngineErr] = useState<string>("");
   const [ciphertext, setCiphertext] = useState<string>("");
   const [submitState, setSubmitState] = useState<string>("");
   const [usingDemoKey, setUsingDemoKey] = useState(false);
   const { signTypedDataAsync } = useSignTypedData();
+  const toast = useToast();
 
   // Try to fetch the engine sealed-box public key from the relay.
   useEffect(() => {
@@ -381,9 +478,28 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
       limitPrice: price,
       account: acct as `0x${string}`,
       nonce: Date.now().toString(),
-      expiry: Math.floor(Date.now() / 1000) + 300,
+      expiry: Math.floor(Date.now() / 1000) + tifSec,
     };
-  }, [account, baseAmount, limitPrice, side]);
+  }, [account, baseAmount, limitPrice, side, tifSec]);
+
+  // Live oracle context: quote the order against the SAME FTSO reference the
+  // settlement contract bounds every clearing price to. Shows the trader whether
+  // their limit would even be eligible to clear (inside ±band) before they sign,
+  // plus the USD notional they're committing.
+  const mid = useLivePrice();
+  const band = useBandBps();
+  // Snapshots for the local order blotter (see lib/orders.ts — privacy-preserving).
+  const escrowTotal = useAccountEscrowTotal(account);
+  const latestBatchId = useLatestSettledBatchId();
+  const { record } = useTrackedOrders(account);
+  const limitNum = Number(limitPrice);
+  const baseNum = Number(baseAmount);
+  const notionalUsd = Number.isFinite(limitNum * baseNum) ? limitNum * baseNum : 0;
+  const devBps =
+    mid.price > 0 && Number.isFinite(limitNum) ? ((limitNum - mid.price) / mid.price) * 10_000 : 0;
+  // A BUY limit above the low band edge (and a SELL below the high edge) can clear;
+  // the uniform clearing price itself must land inside ±band of the FTSO ref.
+  const limitInsideBand = mid.price > 0 && Math.abs(devBps) <= band;
 
   function seal(order: Order): { ciphertext: string; enginePublicKey: string } {
     // Real engine key if the relay is up; otherwise an ephemeral demo key so the
@@ -432,6 +548,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
       setSubmitState("Relay offline — order sealed locally (not submitted). Ciphertext preview below.");
       return;
     }
+    const submissionId = crypto.randomUUID();
     try {
       const res = await fetch(`${relayUrl()}/orders`, {
         method: "POST",
@@ -439,14 +556,42 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
         body: JSON.stringify({
           ciphertext: sealed.ciphertext,
           enginePublicKey: sealed.enginePublicKey,
-          submissionId: crypto.randomUUID(),
+          submissionId,
         }),
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`relay ${res.status}`);
       setSubmitState("Accepted by relay. Order stays sealed until the batch runs in the TEE.");
+      toast.push({
+        kind: "success",
+        title: "Sealed order submitted",
+        message: `${side === Side.Buy ? "BUY" : "SELL"} ${fmtNum(Number(baseAmount), 0)} FXRP @ ${limitPrice} — queued for the next batch`,
+        autoDismissMs: 8000,
+      });
+      // Remember it locally so the trader can track its lifecycle. Nothing here
+      // leaves the browser; status is inferred from the trader's own escrow.
+      if (account) {
+        record({
+          submissionId,
+          account,
+          side: signedOrder.side,
+          baseAmount,
+          limitPrice,
+          createdAt: Math.floor(Date.now() / 1000),
+          expiry: signedOrder.expiry,
+          sinceBatchId: latestBatchId.toString(),
+          escrowSnapshot: escrowTotal.toString(),
+        });
+      }
     } catch (e) {
-      setSubmitState(`Submit failed: ${(e as Error).message}. Ciphertext preview below proves nothing leaked.`);
+      const msg = (e as Error).message ?? "submit failed";
+      setSubmitState(`Submit failed: ${msg}. Ciphertext preview below proves nothing leaked.`);
+      toast.push({
+        kind: "error",
+        title: "Order submit failed",
+        message: shortError(msg),
+        autoDismissMs: 9000,
+      });
     }
   }
 
@@ -488,9 +633,111 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
           <input className="input" inputMode="decimal" value={baseAmount} onChange={(e) => setBaseAmount(e.target.value)} />
         </div>
         <div>
-          <label className="label mb-1">Limit price (XRP/USD)</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="label">Limit price (XRP/USD)</label>
+            <button
+              type="button"
+              className="mono text-2xs text-info hover:text-eclipse disabled:text-muted"
+              disabled={mid.price <= 0}
+              onClick={() => mid.price > 0 && setLimitPrice(mid.price.toFixed(FTSO_PRICE_DECIMALS))}
+              title="Use the live FTSO mid"
+            >
+              mid {mid.price > 0 ? fmtNum(mid.price, 5) : "…"}
+            </button>
+          </div>
           <input className="input" inputMode="decimal" value={limitPrice} onChange={(e) => setLimitPrice(e.target.value)} />
+          {/* Quick limit relative to the live mid. A buyer sets a ceiling at/above
+              mid; a seller a floor at/below mid — so offsets flip sign by side. */}
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {[0, 10, 25, 50].map((bps) => {
+              const signed = side === Side.Buy ? bps : -bps;
+              const target = mid.price > 0 ? mid.price * (1 + signed / 10_000) : 0;
+              return (
+                <button
+                  key={bps}
+                  type="button"
+                  className="tag border-line px-2 py-0.5 text-2xs text-muted hover:border-eclipse hover:text-eclipse disabled:opacity-40"
+                  disabled={mid.price <= 0}
+                  onClick={() => target > 0 && setLimitPrice(target.toFixed(FTSO_PRICE_DECIMALS))}
+                  title={`Set limit ${bps === 0 ? "at" : `${side === Side.Buy ? "+" : "−"}${bps} bps from`} mid`}
+                >
+                  {bps === 0 ? "mid" : `${side === Side.Buy ? "+" : "−"}${bps}bps`}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        <div>
+          <label className="label mb-1">Time in force</label>
+          <div className="flex flex-wrap gap-1">
+            {[
+              { s: 60, label: "1m" },
+              { s: 300, label: "5m" },
+              { s: 900, label: "15m" },
+              { s: 3600, label: "1h" },
+            ].map(({ s, label }) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setTifSec(s)}
+                className={`tag px-2.5 py-0.5 ${tifSec === s ? "border-eclipse text-eclipse" : "border-line text-muted"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mono mt-1 text-2xs text-muted">
+            expires {new Date((Math.floor(Date.now() / 1000) + tifSec) * 1000).toLocaleTimeString()} ·
+            self-releasable after
+          </p>
+        </div>
+
+        {/* Oracle context — is this limit even eligible to clear, and for how much */}
+        <div className="grid grid-cols-3 gap-2 border-y border-line py-2 text-2xs">
+          <div>
+            <div className="label">Notional</div>
+            <div className="mono mt-0.5 text-subtle">{notionalUsd > 0 ? fmtUsd(notionalUsd) : "—"}</div>
+          </div>
+          <div>
+            <div className="label">vs FTSO mid</div>
+            <div className={`mono mt-0.5 ${Math.abs(devBps) <= band ? "text-good" : "text-warn"}`}>
+              {mid.price > 0 ? `${devBps >= 0 ? "+" : ""}${fmtNum(devBps, 1)} bps` : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="label">Band ±{band}bps</div>
+            <div className={`mono mt-0.5 ${limitInsideBand ? "text-good" : "text-warn"}`}>
+              {mid.price <= 0 ? "—" : limitInsideBand ? "eligible" : "out of band"}
+            </div>
+          </div>
+        </div>
+        {mid.price > 0 && !limitInsideBand && (
+          <p className="mono text-2xs text-warn">
+            Limit is outside ±{band} bps of the live FTSO mid — a uniform clearing price this far from
+            the oracle would be rejected on-chain (PriceOutsideBand). It can still rest, but won't
+            cross until the mid moves toward it.
+          </p>
+        )}
+
+        {/* You pay / you receive at the limit (fills clear at or better) */}
+        {baseNum > 0 && limitNum > 0 && (
+          <div className="flex items-center justify-between gap-3 text-2xs">
+            <span className="mono text-muted">
+              you {side === Side.Buy ? "pay" : "sell"}{" "}
+              <span className="text-loss">
+                {side === Side.Buy ? `${fmtNum(notionalUsd, 2)} USDT0` : `${fmtNum(baseNum, 0)} FXRP`}
+              </span>
+            </span>
+            <span className="text-subtle">→</span>
+            <span className="mono text-muted">
+              receive{" "}
+              <span className="text-good">
+                {side === Side.Buy ? `${fmtNum(baseNum, 0)} FXRP` : `${fmtNum(notionalUsd, 2)} USDT0`}
+              </span>
+            </span>
+          </div>
+        )}
 
         <div className="flex gap-2">
           <button
@@ -665,11 +912,124 @@ function BatchFills() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+
+const STATUS_STYLE: Record<OrderStatus, { label: string; tone: string }> = {
+  sealed: { label: "sealed · queued", tone: "border-eclipse text-eclipse" },
+  filled: { label: "filled", tone: "border-good text-good" },
+  expired: { label: "expired", tone: "border-warn text-warn" },
+};
+
+/**
+ * The trader's own order blotter. Purely local (localStorage) and privacy-safe:
+ * status is inferred from the wall clock and the trader's own escrow, never from
+ * a server that could leak the sealed book.
+ */
+function OrderBlotter({ account }: { account?: `0x${string}` }) {
+  const { orders, markFilled, clear } = useTrackedOrders(account);
+  const escrowTotal = useAccountEscrowTotal(account);
+  const latestBatchId = useLatestSettledBatchId();
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const id = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const rows = orders.map((o) => ({
+    o,
+    status: deriveStatus(o, { nowSec, latestBatchId, currentEscrow: escrowTotal }),
+  }));
+
+  // Persist an inferred fill so it survives later escrow changes.
+  useEffect(() => {
+    for (const { o, status } of rows) {
+      if (status === "filled" && !o.filledBatchId) {
+        markFilled(o.submissionId, latestBatchId.toString());
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.map((r) => `${r.o.submissionId}:${r.status}`).join(",")]);
+
+  if (!account) return null;
+
+  return (
+    <Panel
+      title="My orders"
+      subtitle="Local blotter — nothing leaves this browser"
+      actions={
+        orders.length > 0 ? (
+          <button type="button" className="tag border-line text-muted hover:text-loss" onClick={clear}>
+            clear
+          </button>
+        ) : undefined
+      }
+    >
+      {orders.length === 0 ? (
+        <p className="mono text-2xs text-muted">
+          no orders yet — submit a sealed order and it will appear here with a live status inferred
+          from your own escrow (never from a server).
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-2xs">
+            <thead>
+              <tr className="text-muted">
+                <Th>side</Th>
+                <Th>size</Th>
+                <Th>limit</Th>
+                <Th>status</Th>
+                <Th>expiry</Th>
+              </tr>
+            </thead>
+            <tbody className="mono">
+              {rows.map(({ o, status }) => {
+                const st = STATUS_STYLE[status];
+                const ttl = o.expiry - nowSec;
+                return (
+                  <tr key={o.submissionId} className="border-t border-line">
+                    <Td>
+                      <span className={o.side === Side.Buy ? "text-eclipse" : "text-loss"}>
+                        {o.side === Side.Buy ? "BUY" : "SELL"}
+                      </span>
+                    </Td>
+                    <Td>{fmtNum(Number(o.baseAmount), 0)}</Td>
+                    <Td>{o.limitPrice}</Td>
+                    <Td>
+                      <span className={`tag ${st.tone}`}>{st.label}</span>
+                      {status === "filled" && o.filledBatchId && o.filledBatchId !== "0" && (
+                        <span className="ml-1 text-muted">#{o.filledBatchId}</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {status === "sealed"
+                        ? ttl > 0
+                          ? `${ttl}s`
+                          : "expiring…"
+                        : new Date(o.expiry * 1000).toLocaleTimeString()}
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="px-2 py-1.5 font-normal uppercase tracking-wide">{children}</th>;
 }
 function Td({ children }: { children: React.ReactNode }) {
   return <td className="px-2 py-1.5 text-subtle">{children}</td>;
+}
+
+/** Trim a wallet/RPC error to its first meaningful line for a toast. */
+function shortError(msg: string): string {
+  const firstLine = msg.split("\n")[0] ?? msg;
+  return firstLine.length > 120 ? `${firstLine.slice(0, 117)}…` : firstLine;
 }
 
 function NotConfigured({ children }: { children: React.ReactNode }) {

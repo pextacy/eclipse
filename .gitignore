@@ -15,6 +15,7 @@ typechain-types/
 
 # hardhat / foundry
 contracts/cache/
+contracts/cache-forge/
 contracts/artifacts/
 contracts/typechain-types/
 broadcast/

@@ -85,6 +85,21 @@ export const eclipseSettlementAbi = [
     outputs: [{ name: "", type: "bytes21" }],
   },
   {
+    // On-chain this is `nonpayable` (the FTSO getter is payable), but it changes
+    // no meaningful state and the fee is 0 on Coston2, so it resolves cleanly via
+    // eth_call. Declared `view` HERE (web ABI only) so wagmi's read hooks accept
+    // it — this hand-written ABI is decoupled from the Solidity one on purpose.
+    type: "function",
+    name: "currentXrpUsdPrice",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "value", type: "uint256" },
+      { name: "decimals", type: "int8" },
+      { name: "timestamp", type: "uint64" },
+    ],
+  },
+  {
     type: "event",
     name: "Deposited",
     inputs: [
