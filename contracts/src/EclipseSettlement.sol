@@ -288,6 +288,13 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
         for (uint256 i; i < n; ++i) {
             address a = s.accounts[i];
             if (openLegBatch[a] != s.batchId) revert NotCommitted();
+            // The leg must still be LIVE. `withdraw` is expiry-aware (`_hasOpenLeg`
+            // frees escrow once `openLegExpiry` passes), so without this check a
+            // settlement signed with an expiry later than the commit's could apply
+            // to an account that already withdrew its backing — reverting the whole
+            // batch (griefing) or, worse, drifting from the withdraw invariant.
+            // Past expiry the account must self-release, not be settled.
+            if (block.timestamp > openLegExpiry[a]) revert BatchExpired();
             _applyDelta(a, fxrp, s.fxrpDeltas[i]);
             _applyDelta(a, usdt0, s.usdt0Deltas[i]);
             openLegBatch[a] = 0;
@@ -374,6 +381,14 @@ contract EclipseSettlement is EIP712, ReentrancyGuard {
 
     /// @dev Reads the live FTSO XRP/USD value, forwarding the (currently 0) fee.
     /// Returns the value and any msg.value to refund to the caller.
+    ///
+    /// NOTE on staleness: an on-chain staleness guard was evaluated and found
+    /// infeasible with this feed. `getFeedById`'s returned timestamp equals the
+    /// CURRENT block timestamp on the Coston2 block-latency feed (verified on a
+    /// fork: it advances 1:1 with `block.timestamp`), not the last-value-update
+    /// time — so `block.timestamp - feedTs` is always ~0 and can never detect a
+    /// frozen oracle. A genuine feed stall is therefore not observable through
+    /// this interface; see SECURITY.md for the accepted residual risk.
     function _readFtsoValue() private returns (uint256 value, uint256 refund) {
         FtsoV2Interface ftso = FtsoV2Interface(flareRegistry.getContractAddressByName(_FTSO_NAME));
         uint256 fee = _ftsoFee();

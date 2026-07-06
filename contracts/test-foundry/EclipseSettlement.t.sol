@@ -513,6 +513,32 @@ contract EclipseSettlementForkTest is Test {
         settlement.settleBatch(s, ssig);
     }
 
+    function test_settle_after_leg_expiry_reverts() public {
+        // Commit with a SHORT leg expiry, but sign a settlement dated far in the
+        // future (the exploitable gap: nothing forces s.expiry <= commit.expiry).
+        // Once the leg expiry passes, `withdraw` is allowed again — so settlement
+        // must NOT still apply, or it diverges from the always-redeemable custody
+        // invariant. It must revert.
+        uint256 shortExpiry = block.timestamp + 100;
+        EclipseSettlement.BatchCommit memory c = EclipseSettlement.BatchCommit({
+            batchId: 1, accounts: _accounts2(), expiry: shortExpiry, nonce: 1
+        });
+        settlement.commitBatch(c, _signCommit(ENGINE_PK, c));
+
+        vm.prank(deskA);
+        settlement.deposit(usd, 50 * USD_UNIT);
+        vm.prank(deskB);
+        settlement.deposit(fxrp, 100 * FXRP_UNIT);
+
+        // Settlement expiry LATER than the commit/leg expiry.
+        EclipseSettlement.Settlement memory s = _happySettlement(block.timestamp + 1 hours);
+        // Past the leg expiry but well within FTSO staleness.
+        vm.warp(shortExpiry + 1);
+        bytes memory sig = _signSettlement(ENGINE_PK, s);
+        vm.expectRevert(EclipseSettlement.BatchExpired.selector);
+        settlement.settleBatch(s, sig);
+    }
+
     function test_currentXrpUsdPrice_matches_live_feed() public {
         // The UI reads this to price orders against the SAME reference the band
         // check uses. It must equal the live FTSO value read straight from the
