@@ -149,6 +149,71 @@ export function useLatestSettledBatchId(): bigint {
   return latest;
 }
 
+export interface RecentBatch {
+  batchId: bigint;
+  clearingPrice: bigint;
+  ftsoOnChain: bigint;
+  signer: `0x${string}`;
+  txHash: `0x${string}`;
+}
+
+/**
+ * Recent settled batches (newest first), straight from public BatchSettled
+ * events. Shared by the market tape and any settlement list so there's one scan.
+ */
+export function useRecentBatches(limit = 12): {
+  batches: RecentBatch[];
+  state: "idle" | "loading" | "empty" | "error";
+} {
+  const publicClient = usePublicClient();
+  const [batches, setBatches] = useState<RecentBatch[]>([]);
+  const [state, setState] = useState<"idle" | "loading" | "empty" | "error">("idle");
+
+  useEffect(() => {
+    if (!isConfigured || !publicClient) return;
+    let cancelled = false;
+    const scan = async () => {
+      setState((s) => (s === "idle" && batches.length === 0 ? "loading" : s));
+      try {
+        const head = await publicClient.getBlockNumber();
+        const lookback = 100_000n;
+        const fromBlock = head > lookback ? head - lookback : 0n;
+        const logs = await publicClient.getContractEvents({
+          address: deployment.eclipseSettlement,
+          abi: eclipseSettlementAbi,
+          eventName: "BatchSettled",
+          fromBlock,
+          toBlock: "latest",
+        });
+        if (cancelled) return;
+        const mapped: RecentBatch[] = logs
+          .map((l) => ({
+            batchId: l.args.batchId ?? 0n,
+            clearingPrice: l.args.clearingPrice ?? 0n,
+            ftsoOnChain: l.args.ftsoOnChain ?? 0n,
+            signer: (l.args.signer ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
+            txHash: l.transactionHash,
+          }))
+          .reverse()
+          .slice(0, limit);
+        setBatches(mapped);
+        setState(mapped.length === 0 ? "empty" : "idle");
+      } catch {
+        if (!cancelled) setState((s) => (batches.length > 0 ? s : "error"));
+      }
+    };
+    void scan();
+    const id = setInterval(scan, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicClient, limit]);
+
+  return { batches, state };
+}
+
 export interface BatchStatus {
   autoClose: boolean;
   intervalSeconds: number;

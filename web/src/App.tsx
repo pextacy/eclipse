@@ -12,6 +12,7 @@ import { BatchesView } from "./views/BatchesView";
 import { PortfolioView } from "./views/PortfolioView";
 import { OverviewView } from "./views/OverviewView";
 import { MarketBar } from "./components/MarketBar";
+import { SettingsButton } from "./components/SettingsButton";
 import { eclipseSettlementAbi } from "./lib/abis";
 import { deployment, isConfigured } from "./lib/deployment";
 
@@ -71,6 +72,7 @@ export function App() {
             )}
           </span>
           <ConnectWallet />
+          <SettingsButton />
         </div>
       </header>
 

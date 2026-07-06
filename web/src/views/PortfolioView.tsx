@@ -5,6 +5,7 @@ import { TxLink } from "../components/TxLink";
 import { deployment, isConfigured } from "../lib/deployment";
 import { usePortfolio } from "../lib/portfolio";
 import { formatUnits, fmtNum, fmtUsd } from "../lib/format";
+import { toCsv, downloadCsv } from "../lib/csv";
 
 /**
  * Portfolio & P&L, derived entirely from public, per-account chain data via the
@@ -131,7 +132,36 @@ export function PortfolioView() {
       <Panel
         title="Collateral activity"
         subtitle="Your Deposited / Withdrawn events"
-        actions={<span className="tag border-line-strong text-muted">{p.flows.length} shown</span>}
+        actions={
+          <div className="flex items-center gap-2">
+            {p.flows.length > 0 && (
+              <button
+                type="button"
+                className="tag border-line text-muted hover:text-eclipse"
+                onClick={() => {
+                  const csv = toCsv(
+                    ["action", "token", "amount", "block", "tx"],
+                    p.flows.map((f) => {
+                      const isFxrp = f.token.toLowerCase() === deployment.fxrp.toLowerCase();
+                      const meta = isFxrp ? p.fxrp : p.usdt0;
+                      return [
+                        f.kind,
+                        meta.symbol,
+                        formatUnits(f.amount, meta.decimals).replace(/,/g, ""),
+                        f.block.toString(),
+                        f.txHash,
+                      ];
+                    }),
+                  );
+                  downloadCsv(`eclipse-activity-${address?.slice(0, 8) ?? "account"}.csv`, csv);
+                }}
+              >
+                export csv
+              </button>
+            )}
+            <span className="tag border-line-strong text-muted">{p.flows.length} shown</span>
+          </div>
+        }
       >
         {p.state === "loading" && <p className="mono text-2xs text-muted">loading your events…</p>}
         {p.state === "error" && (

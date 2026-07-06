@@ -1,6 +1,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 import { XRP_USD_FEED_ID, DEFAULT_BAND_BPS } from "@eclipse/shared";
 import example from "./deployment.example.json";
+import { getSettings } from "./settings";
 
 /**
  * Deployment resolution.
@@ -50,5 +51,8 @@ export const deployment: Deployment = {
 export const isConfigured: boolean = deployment.eclipseSettlement !== ZERO;
 
 export function relayUrl(): string {
+  // Runtime user override (Settings) wins, then env, then the local default.
+  const override = getSettings().relayUrl.trim();
+  if (override) return override;
   return process.env.NEXT_PUBLIC_RELAY_URL?.trim() || "http://localhost:8787";
 }

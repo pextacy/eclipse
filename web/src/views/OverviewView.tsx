@@ -2,6 +2,8 @@ import { useAccount, useReadContract } from "wagmi";
 import { Panel } from "../components/Panel";
 import { StatTile } from "../components/StatTile";
 import { Sparkline } from "../components/Sparkline";
+import { MarketTape } from "../components/MarketTape";
+import { PriceChart } from "../components/PriceChart";
 import { eclipseSettlementAbi } from "../lib/abis";
 import { deployment, isConfigured } from "../lib/deployment";
 import {
@@ -87,6 +89,13 @@ export function OverviewView({ onNavigate }: { onNavigate?: (tab: string) => voi
             value={latestBatchId > 0n ? `#${latestBatchId.toString()}` : "—"}
             sub="latest on-chain"
           />
+        </div>
+        <div className="mt-4">
+          <PriceChart data={history} mid={mid.price} bandBps={band} height={200} />
+        </div>
+        <div className="mt-3 border-t border-line pt-3">
+          <div className="label mb-1.5">Recent clearings (bps vs FTSO)</div>
+          <MarketTape limit={10} />
         </div>
       </Panel>
 

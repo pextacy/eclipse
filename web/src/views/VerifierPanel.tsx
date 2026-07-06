@@ -8,6 +8,7 @@ import { TxLink } from "../components/TxLink";
 import { eclipseSettlementAbi, eclipseRegistryAbi } from "../lib/abis";
 import { deployment, isConfigured } from "../lib/deployment";
 import { truncateHex, ftsoToNumber, fmtNum } from "../lib/format";
+import { SystemStatus } from "../components/SystemStatus";
 
 interface LatestBatch {
   batchId: bigint;
@@ -139,6 +140,8 @@ export function VerifierPanel() {
         </div>
       ) : (
         <>
+          <SystemStatus />
+
           {state === "loading" && (
             <Panel title="Latest settlement">
               <p className="mono text-2xs text-muted">scanning chain for BatchSettled…</p>

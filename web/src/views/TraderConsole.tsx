@@ -31,6 +31,8 @@ import {
 } from "../lib/market";
 import { useTrackedOrders, deriveStatus, type OrderStatus } from "../lib/orders";
 import { useToast } from "../components/Toast";
+import { useSettings } from "../lib/settings";
+import { toCsv, downloadCsv } from "../lib/csv";
 
 interface EnginePubkey {
   publicKey: string;
@@ -488,6 +490,7 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   // plus the USD notional they're committing.
   const mid = useLivePrice();
   const band = useBandBps();
+  const { settings } = useSettings();
   // Snapshots for the local order blotter (see lib/orders.ts — privacy-preserving).
   const escrowTotal = useAccountEscrowTotal(account);
   const latestBatchId = useLatestSettledBatchId();
@@ -500,6 +503,9 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
   // A BUY limit above the low band edge (and a SELL below the high edge) can clear;
   // the uniform clearing price itself must land inside ±band of the FTSO ref.
   const limitInsideBand = mid.price > 0 && Math.abs(devBps) <= band;
+  // Softer, user-configurable guard on top of the hard on-chain band.
+  const beyondSlippage =
+    mid.price > 0 && limitInsideBand && Math.abs(devBps) > settings.slippageBps;
 
   function seal(order: Order): { ciphertext: string; enginePublicKey: string } {
     // Real engine key if the relay is up; otherwise an ephemeral demo key so the
@@ -717,6 +723,12 @@ function SealedOrderForm({ account }: { account?: `0x${string}` }) {
             Limit is outside ±{band} bps of the live FTSO mid — a uniform clearing price this far from
             the oracle would be rejected on-chain (PriceOutsideBand). It can still rest, but won't
             cross until the mid moves toward it.
+          </p>
+        )}
+        {beyondSlippage && (
+          <p className="mono text-2xs text-warn">
+            {fmtNum(Math.abs(devBps), 1)} bps from mid exceeds your {settings.slippageBps} bps slippage
+            tolerance (still within the on-chain ±{band} bps band). Adjust in ⚙ settings if intended.
           </p>
         )}
 
@@ -959,9 +971,33 @@ function OrderBlotter({ account }: { account?: `0x${string}` }) {
       subtitle="Local blotter — nothing leaves this browser"
       actions={
         orders.length > 0 ? (
-          <button type="button" className="tag border-line text-muted hover:text-loss" onClick={clear}>
-            clear
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="tag border-line text-muted hover:text-eclipse"
+              onClick={() => {
+                const csv = toCsv(
+                  ["submissionId", "side", "baseAmount", "limitPrice", "status", "created", "expiry", "filledBatchId"],
+                  rows.map(({ o, status }) => [
+                    o.submissionId,
+                    o.side === Side.Buy ? "BUY" : "SELL",
+                    o.baseAmount,
+                    o.limitPrice,
+                    status,
+                    new Date(o.createdAt * 1000).toISOString(),
+                    new Date(o.expiry * 1000).toISOString(),
+                    o.filledBatchId ?? "",
+                  ]),
+                );
+                downloadCsv(`eclipse-orders-${account?.slice(0, 8) ?? "account"}.csv`, csv);
+              }}
+            >
+              export csv
+            </button>
+            <button type="button" className="tag border-line text-muted hover:text-loss" onClick={clear}>
+              clear
+            </button>
+          </div>
         ) : undefined
       }
     >

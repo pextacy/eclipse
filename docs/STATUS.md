@@ -38,7 +38,11 @@ web         builds clean (next build — App Router, static prerender + strict t
                          sparkline, band, next-batch countdown); wallet-balance + Max on deposit/withdraw;
                          live oracle price context + eligibility on the order form; local privacy-preserving
                          order blotter; escrow-derived position + mark-to-market P&L; app-wide tx toasts;
-                         network guard, release-expired-leg, trading-paused banner)
+                         settings modal (slippage tolerance + relay-URL override); live market tape;
+                         interactive session price chart (band overlay + hover); CSV export of orders
+                         + activity; consolidated system-status panel (relay/engine/attestation health);
+                         native-gas balance + low-gas warning; network guard, release-expired-leg,
+                         trading-paused banner)
 ```
 
 There are **no mock contracts anywhere in the repo** — the settlement suite exercises
