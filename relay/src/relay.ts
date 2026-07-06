@@ -27,6 +27,8 @@ export class Relay {
   readonly log: Logger;
   private readonly engine: IEngineClient;
   private readonly onchain?: OnChainRelay;
+  /** Serializes closeBatch so two never run concurrently (see closeBatch). */
+  private closeChain: Promise<unknown> = Promise.resolve();
 
   constructor(deps: RelayDeps) {
     this.log = deps.logger ?? new Logger();
@@ -41,11 +43,24 @@ export class Relay {
   }
 
   /**
-   * Close the current batch: forward the sealed pool to the engine, receive the
-   * signed net settlement, and (if wired) relay it on-chain. The relay never
-   * sees order contents and never signs the settlement.
+   * Close the current batch, SERIALIZED. An on-chain relay can outlast the batch
+   * cadence, so an overlapping scheduler tick could otherwise start a second
+   * closeBatch whose on-chain send collides with the first on the sender nonce
+   * (ethers auto-nonce), dropping a settlement. Each close waits for the prior
+   * one to finish, then drains fresh — so late-arriving orders are handled by the
+   * next close rather than a concurrent one. (Security audit relay MED-1.)
    */
-  async closeBatch(): Promise<CloseResult> {
+  closeBatch(): Promise<CloseResult> {
+    const run = this.closeChain.then(
+      () => this._closeBatch(),
+      () => this._closeBatch(),
+    );
+    // Keep the chain alive regardless of this run's outcome.
+    this.closeChain = run.catch(() => {});
+    return run;
+  }
+
+  private async _closeBatch(): Promise<CloseResult> {
     const orders = this.pool.drain();
     this.log.info("closing batch", { orderCount: orders.length });
     if (orders.length === 0) {

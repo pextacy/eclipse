@@ -11,9 +11,16 @@ const SECRET_ACCOUNT = "0xSECRETdeadbeefSECRETdeadbeefSECRETdead01";
 const SECRET_AMOUNT = "1337424242";
 
 /** An opaque sealed envelope. We stuff recognizable plaintext into the ciphertext
- * blob to prove the relay never decodes or logs it. */
+ * blob to prove the relay never decodes or logs it. Each call yields a DISTINCT
+ * ciphertext — crypto_box_seal is randomized, so two genuine submissions never
+ * share a ciphertext (an identical ciphertext means a replay, which the pool
+ * dedups). The uniquifier models that while keeping the plaintext markers. */
 function envelope(): SealedOrder {
-  const fakePlaintext = JSON.stringify({ account: SECRET_ACCOUNT, baseAmount: SECRET_AMOUNT });
+  const fakePlaintext = JSON.stringify({
+    account: SECRET_ACCOUNT,
+    baseAmount: SECRET_AMOUNT,
+    uniq: crypto.randomUUID(),
+  });
   return {
     ciphertext: Buffer.from(fakePlaintext).toString("base64"),
     enginePublicKey: Buffer.from("engine-pubkey").toString("base64"),
@@ -103,6 +110,21 @@ describe("Relay (untrusted)", () => {
     expect(pool.size()).to.equal(2);
     expect(() => pool.accept(envelope())).toThrow(PoolFull);
     expect(pool.size()).to.equal(2);
+  });
+
+  it("dedups a resubmitted envelope within a batch (no pool/side inflation)", () => {
+    const pool = new OrderPool(new Logger(false), 100);
+    const e = envelope();
+    pool.accept(e);
+    pool.accept(e); // same submissionId + ciphertext → idempotent no-op
+    pool.accept({ ...e, submissionId: crypto.randomUUID() }); // same ciphertext, new id → still dup
+    expect(pool.size()).to.equal(1);
+    // A genuinely different ciphertext is accepted; draining resets the dedup index.
+    pool.accept(envelope());
+    expect(pool.size()).to.equal(2);
+    pool.drain();
+    pool.accept(e); // allowed again in a fresh batch (resting-order resubmission)
+    expect(pool.size()).to.equal(1);
   });
 
   it("auto-closes a batch only when orders are pending (scheduler)", async () => {

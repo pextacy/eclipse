@@ -77,10 +77,15 @@ export function orderSigningValue(o: Order) {
  * it can never read `ciphertext` (sealed to the engine's public key).
  */
 export const SealedOrderSchema = z.object({
-  /** libsodium sealed box, base64. Opaque to the relay. */
-  ciphertext: z.string().min(1),
-  /** Which engine public key this was sealed to (base64), for key rotation. */
-  enginePublicKey: z.string().min(1),
+  /**
+   * libsodium sealed box, base64. Opaque to the relay. Bounded so a flood of
+   * valid-but-oversized envelopes can't exhaust relay/engine memory: a sealed
+   * Order (with signature) is a few hundred base64 chars, so 2 KB is generous
+   * headroom while still capping per-order retained bytes.
+   */
+  ciphertext: z.string().min(1).max(2048),
+  /** Which engine public key this was sealed to (base64 32-byte key ≈ 44 chars). */
+  enginePublicKey: z.string().min(1).max(128),
   /** Client-chosen submission id for correlation; carries no order content. */
   submissionId: z.string().uuid(),
 });
