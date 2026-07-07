@@ -36,7 +36,7 @@ TO_ADDRESS=0x... pnpm --filter @eclipse/scripts transfer:fxrp   # moves 1 FXRP �
 
 ```bash
 pnpm --filter @eclipse/contracts build
-pnpm --filter @eclipse/scripts deploy          # → deployments/coston2.json + explorer links
+pnpm --filter @eclipse/scripts run deploy          # → deployments/coston2.json + explorer links
 ```
 
 Verify the source on the Blockscout explorer:

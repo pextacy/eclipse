@@ -23,9 +23,9 @@
     "test:tee": "pnpm --filter @eclipse/tee test",
     "test:relay": "pnpm --filter @eclipse/relay test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "resolve": "pnpm --filter @eclipse/scripts resolve",
-    "deploy:coston2": "pnpm --filter @eclipse/scripts deploy",
-    "demo:batch": "pnpm --filter @eclipse/scripts demo:batch"
+    "resolve": "pnpm --filter @eclipse/scripts run resolve",
+    "deploy:coston2": "pnpm --filter @eclipse/scripts run deploy",
+    "demo:batch": "pnpm --filter @eclipse/scripts run demo:batch"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

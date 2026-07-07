@@ -3,13 +3,13 @@
  * REGISTRY-RESOLVED token addresses (no hardcoding — CLAUDE.md §2.2). Writes the
  * live addresses to deployments/coston2.json and prints explorer links.
  *
- *   pnpm --filter @eclipse/scripts deploy
+ *   pnpm --filter @eclipse/scripts run deploy
  *
  * Then verify the source on the Blockscout explorer from the contracts package:
  *   pnpm --filter @eclipse/contracts exec hardhat verify --network coston2 <settlement> \
  *     <flareRegistry> <eclipseRegistry> <fxrp> <usdt0> <feedId> <bandBps> <guardian>
  */
-import { ContractFactory, computeAddress } from "ethers";
+import { ContractFactory, computeAddress, NonceManager } from "ethers";
 import {
   FLARE_CONTRACT_REGISTRY,
   XRP_USD_FEED_ID,
@@ -23,8 +23,13 @@ import { saveDeployment } from "./lib/deployments.js";
 import { type EclipseRegistryContract } from "./lib/contracts.js";
 
 async function main() {
-  const w = wallet();
-  console.log(`Deployer: ${w.address}`);
+  const base = wallet();
+  const deployerAddr = base.address;
+  // Manage the nonce locally so back-to-back deploys/registration can't reuse a
+  // nonce (a fast chain can leave `getTransactionCount("pending")` stale between
+  // sequential sends → "nonce has already been used"). Robust everywhere.
+  const w = new NonceManager(base);
+  console.log(`Deployer: ${deployerAddr}`);
   const bandBps = Number(optional("BAND_BPS", String(DEFAULT_BAND_BPS)));
 
   // Resolve real token addresses.
@@ -41,7 +46,7 @@ async function main() {
   // Deploy EclipseRegistry(owner = deployer for the demo; multisig in prod).
   const regArt = loadArtifact("EclipseRegistry");
   const RegistryFactory = new ContractFactory(regArt.abi, regArt.bytecode, w);
-  const registry = await RegistryFactory.deploy(w.address);
+  const registry = await RegistryFactory.deploy(deployerAddr);
   await registry.waitForDeployment();
   const registryAddr = await registry.getAddress();
   const regTx = registry.deploymentTransaction()!.hash;
@@ -52,7 +57,7 @@ async function main() {
   const SettlementFactory = new ContractFactory(setArt.abi, setArt.bytecode, w);
   // Emergency guardian (can pause matching, never touches custody). Defaults to
   // the deployer; set GUARDIAN_ADDRESS to a multisig in production.
-  const guardian = optional("GUARDIAN_ADDRESS", w.address);
+  const guardian = optional("GUARDIAN_ADDRESS", deployerAddr);
   const settlement = await SettlementFactory.deploy(
     FLARE_CONTRACT_REGISTRY,
     registryAddr,
@@ -101,7 +106,7 @@ async function main() {
     assetManager,
     bandBps,
     feedId: XRP_USD_FEED_ID,
-    deployer: w.address,
+    deployer: deployerAddr,
     blockNumber,
     txHashes,
   });

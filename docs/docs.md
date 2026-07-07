@@ -171,7 +171,7 @@ TO_ADDRESS=0x... pnpm --filter @eclipse/scripts transfer:fxrp
 
 # 4. Deploy contracts to Coston2 (writes deployments/coston2.json), then verify
 pnpm --filter @eclipse/contracts build
-pnpm --filter @eclipse/scripts deploy
+pnpm --filter @eclipse/scripts run deploy
 pnpm --filter @eclipse/contracts exec hardhat verify --network coston2 <settlement> <args...>
 
 # 5. Build the TEE extension reproducibly and register its code-hash
